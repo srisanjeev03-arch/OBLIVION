@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem \"D:\\\\OBLIVION\" -Recurse -File | Select-Object -ExpandProperty FullName | Where-Object { $_ -match 'package\\\\.json|ecc|install' } | Format-List)",
+      "WebSearch"
+    ]
+  }
+}

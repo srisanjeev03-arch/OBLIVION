@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "operation_id": "op-demo-001",
+  "target_sha256": "example",
+  "mode": "SELECTIVE_PERMANENT",
+  "policy_id": "ERASURE.LOGICAL.SELECTIVE.V1",
+  "recovery_result": "NOT_RECOVERED",
+  "residual_result": "NO_MATCHING_ARTIFACTS_FOUND",
+  "assurance": {
+    "risk_level": "LOW",
+    "limitations": [
+      "Controlled NTFS test scope"
+    ]
+  },
+  "evidence_hash": "example",
+  "signature_algorithm": "Ed25519"
+}

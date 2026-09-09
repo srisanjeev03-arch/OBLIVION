@@ -1,0 +1,341 @@
+openapi: 3.0.3
+info:
+  title: Oblivion API
+  version: 0.1.0
+  description: >
+    Backend API for controlled data erasure, recovery, residual analysis,
+    assurance and certificate verification.
+servers:
+  - url: http://127.0.0.1:8000
+security:
+  - bearerAuth: []
+
+paths:
+  /api/targets/analyze:
+    post:
+      summary: Analyze a filesystem target
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TargetAnalyzeRequest'
+      responses:
+        '200':
+          description: Target analysis
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TargetProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/targets/{target_id}:
+    get:
+      summary: Get analyzed target
+      parameters:
+        - $ref: '#/components/parameters/TargetId'
+      responses:
+        '200':
+          description: Target profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TargetProfile'
+
+  /api/operations:
+    post:
+      summary: Create a validated erasure operation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOperationRequest'
+      responses:
+        '202':
+          description: Operation accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/operations/{operation_id}:
+    get:
+      summary: Get operation status
+      parameters:
+        - $ref: '#/components/parameters/OperationId'
+      responses:
+        '200':
+          description: Operation status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+
+  /api/operations/{operation_id}/cancel:
+    post:
+      summary: Request cancellation
+      parameters:
+        - $ref: '#/components/parameters/OperationId'
+      responses:
+        '202':
+          description: Cancellation requested
+
+  /api/operations/{operation_id}/events:
+    get:
+      summary: Get operation evidence events
+      parameters:
+        - $ref: '#/components/parameters/OperationId'
+      responses:
+        '200':
+          description: Evidence events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EvidenceEvent'
+
+  /api/recovery-objects:
+    get:
+      summary: List authorized recovery objects
+      responses:
+        '200':
+          description: Recovery objects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RecoveryObject'
+
+  /api/recovery-objects/{recovery_id}/restore:
+    post:
+      summary: Restore a controlled-recoverable object
+      parameters:
+        - $ref: '#/components/parameters/RecoveryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [destination]
+              properties:
+                destination:
+                  type: string
+      responses:
+        '202':
+          description: Restore accepted
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/certificates/{certificate_id}:
+    get:
+      summary: Get certificate
+      parameters:
+        - $ref: '#/components/parameters/CertificateId'
+      responses:
+        '200':
+          description: Certificate
+
+  /api/certificates/{certificate_id}/verify:
+    post:
+      summary: Verify certificate integrity and signature
+      parameters:
+        - $ref: '#/components/parameters/CertificateId'
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CertificateVerificationResult'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    TargetId:
+      name: target_id
+      in: path
+      required: true
+      schema: {type: string}
+    OperationId:
+      name: operation_id
+      in: path
+      required: true
+      schema: {type: string}
+    RecoveryId:
+      name: recovery_id
+      in: path
+      required: true
+      schema: {type: string}
+    CertificateId:
+      name: certificate_id
+      in: path
+      required: true
+      schema: {type: string}
+
+  responses:
+    BadRequest:
+      description: Invalid request
+    Forbidden:
+      description: Not authorized
+
+  schemas:
+    TargetAnalyzeRequest:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+        include_content_analysis:
+          type: boolean
+          default: false
+
+    TargetProfile:
+      type: object
+      properties:
+        id: {type: string}
+        path: {type: string}
+        type: {type: string}
+        size_bytes: {type: integer}
+        file_count: {type: integer}
+        sha256: {type: string}
+        storage_profile:
+          $ref: '#/components/schemas/StorageProfile'
+        sensitivity:
+          $ref: '#/components/schemas/Sensitivity'
+
+    StorageProfile:
+      type: object
+      properties:
+        volume: {type: string}
+        filesystem: {type: string}
+        media_type: {type: string}
+        encryption_status: {type: string}
+        capabilities:
+          type: array
+          items: {type: string}
+        limitations:
+          type: array
+          items: {type: string}
+
+    Sensitivity:
+      type: object
+      properties:
+        level:
+          type: string
+          enum: [PUBLIC, INTERNAL, CONFIDENTIAL, CRITICAL]
+        categories:
+          type: array
+          items: {type: string}
+        explanation: {type: string}
+
+    CreateOperationRequest:
+      type: object
+      required: [target_id, mode, policy_id, confirmation]
+      properties:
+        target_id: {type: string}
+        mode:
+          type: string
+          enum: [COMPLETE_ERASURE, SELECTIVE_PERMANENT, CONTROLLED_RECOVERABLE]
+        policy_id: {type: string}
+        confirmation:
+          type: object
+          required: [acknowledged_risk]
+          properties:
+            acknowledged_risk: {type: boolean}
+        recovery:
+          type: object
+          properties:
+            retention_seconds: {type: integer}
+
+    Operation:
+      type: object
+      properties:
+        id: {type: string}
+        target_id: {type: string}
+        mode: {type: string}
+        policy_id: {type: string}
+        state:
+          type: string
+          enum:
+            [CREATED, ANALYZING, READY, ERASING, VERIFYING, RECOVERY_TEST,
+             RESIDUAL_SCAN, ASSESSING, CERTIFYING, COMPLETED, PARTIAL,
+             FAILED, INCONCLUSIVE, CANCELLED]
+        progress_percent: {type: number}
+        warnings:
+          type: array
+          items: {type: string}
+        error:
+          type: object
+          nullable: true
+
+    RecoveryObject:
+      type: object
+      properties:
+        id: {type: string}
+        operation_id: {type: string}
+        status: {type: string}
+        created_at: {type: string}
+        expires_at: {type: string}
+        original_sha256: {type: string}
+
+    EvidenceEvent:
+      type: object
+      properties:
+        sequence: {type: integer}
+        event_type: {type: string}
+        timestamp: {type: string}
+        payload_hash: {type: string}
+        previous_event_hash: {type: string}
+
+    VerificationResult:
+      type: object
+      properties:
+        valid: {type: boolean}
+        evidence_integrity: {type: boolean}
+        signature_valid: {type: boolean}
+        reason: {type: string}
+    CertificateVerificationResult:
+      required: [certificate_id, overall_status, dimensions, cannot_prove]
+      type: object
+      properties:
+        certificate_id: {type: string}
+        overall_status:
+          type: string
+          enum: [VALID, INVALID, INCONCLUSIVE]
+        dimensions:
+          type: array
+          minItems: 10
+          items:
+            type: object
+            required: [dimension, result, detail]
+            properties:
+              dimension:
+                type: string
+                enum: [STRUCTURE, VERSION_COMPATIBILITY, EVIDENCE_AVAILABILITY, EVIDENCE_DIGEST, SIGNATURE_VALIDITY, PUBLIC_KEY_CONSISTENCY, SIGNER_TRUST, EVIDENCE_CHAIN_INTEGRITY, OPERATION_CONSISTENCY, TARGET_CONSISTENCY]
+              result:
+                type: string
+                enum: [PASS, FAIL, NOT_CHECKED, INCONCLUSIVE]
+              detail: {type: string}
+              evidence_ref: {type: string, nullable: true}
+        signature_valid: {type: boolean, nullable: true}
+        evidence_integrity: {type: boolean, nullable: true}
+        signer_trusted: {type: boolean, nullable: true}
+        cannot_prove:
+          type: array
+          items: {type: string}

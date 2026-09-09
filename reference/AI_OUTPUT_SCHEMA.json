@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "sensitivity": {
+    "level": "CRITICAL",
+    "categories": [
+      "customer_data"
+    ],
+    "confidence": 0.0,
+    "explanation": ""
+  },
+  "risk": {
+    "level": "INCONCLUSIVE",
+    "factors": [],
+    "explanation": ""
+  },
+  "recommendation": {
+    "policy_id": "ERASURE.LOGICAL.SELECTIVE.V1",
+    "reason": "",
+    "allowed": true
+  },
+  "residuals": []
+}

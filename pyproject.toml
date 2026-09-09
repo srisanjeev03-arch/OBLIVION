@@ -1,0 +1,40 @@
+[project]
+name = "oblivion"
+version = "0.1.0-slice1"
+description = "Oblivion — Intelligent Data Erasure, Recovery & Verification Platform (Engine)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn>=0.25.0",
+    "pydantic>=2.0.0",
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.12.0",
+    "cryptography>=41.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.26.0",
+    "mypy>=1.7.0",
+    "ruff>=0.3.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py312"

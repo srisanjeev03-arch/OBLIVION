@@ -1,0 +1,1015 @@
+PASTE THE FOLLOWING INTO CLAUDE CODE FROM THE ROOT OF THE OBLIVION REPOSITORY:
+
+# Oblivion — Initial Claude Code Configuration, Repository Audit & Implementation Prompt
+
+You are the primary backend/security engineer for Oblivion — Intelligent Data Erasure, Recovery & Verification Platform.
+
+Your job is to take the existing Oblivion repository from its current state to a secure, testable, SIH-ready implementation.
+
+1. IMPORTANT: READ THE PROJECT REFERENCES FIRST
+
+Before modifying any code, locate and read the Oblivion reference pack that has been placed in this repository.
+
+At minimum, read:
+
+CLAUDE.md
+README.md
+AGENT_HANDOFF.md
+CLAUDE_TASKS.md
+
+docs/PROJECT_SPEC.md
+docs/ARCHITECTURE.md
+docs/FEATURES.md
+docs/SECURITY.md
+docs/THREAT_MODEL.md
+docs/AI.md
+docs/DATA_MODEL.md
+docs/API.md
+docs/OPENAPI.yaml
+docs/TEST_PLAN.md
+docs/DEMO.md
+docs/DEVELOPMENT_PLAN.md
+docs/IMPLEMENTATION_NOTES.md
+docs/LIMITATIONS.md
+docs/REQUIREMENTS_TRACEABILITY.md
+docs/ERASURE_ENGINE_SPEC.md
+docs/RECOVERY_ENGINE_SPEC.md
+docs/RESIDUAL_ANALYSIS_SPEC.md
+docs/CERTIFICATE_FORMAT.md
+docs/CRYPTO_KEY_MANAGEMENT.md
+docs/PRIVILEGE_BOUNDARY.md
+docs/WINDOWS_NTFS_NOTES.md
+docs/OMNIROUTE_INTEGRATION.md
+docs/ARCHITECTURE_DECISIONS.md
+docs/SECURITY_REVIEW_CHECKLIST.md
+
+frontend/BOLT_AI_FRONTEND_SPEC.md
+frontend/FRONTEND_API_CONTRACT.md
+frontend/FRONTEND_STATE_SPEC.md
+frontend/FRONTEND_SECURITY.md
+
+reference/OPERATION_STATES.md
+reference/POLICY_IDS.md
+reference/AI_OUTPUT_SCHEMA.json
+reference/EVIDENCE_EXAMPLE.json
+reference/ERROR_CODES.md
+reference/DEMO_SEED_DATA.md
+
+Treat CLAUDE.md as the highest-level project instruction.
+
+Do not blindly trust existing implementation code over the reference specifications. If the repository conflicts with the specification, identify the conflict during the audit.
+
+2. UNDERSTAND THE ARCHITECTURE
+
+The project has two intentionally separated sides.
+
+Frontend
+
+The frontend is built by BoltAI.
+
+BoltAI owns:
+
+dashboard
+target selection
+target analysis UI
+operation configuration
+confirmation screens
+operation progress
+recovery vault UI
+recovery authorization UI
+residual analysis UI
+assurance UI
+certificate viewer
+certificate verification
+audit/evidence viewer
+API client integration
+
+Claude Code must NOT create a competing frontend unless explicitly requested.
+
+Backend
+
+Claude Code owns:
+
+REST API
+authentication
+authorization/RBAC
+target discovery
+storage profiling
+hashing
+erasure engine
+recovery testing
+residual scanning
+recovery vault
+authentication/RBAC
+cryptographic operations
+evidence/audit
+certificate generation and verification
+AI service integration
+privileged Windows boundary
+automated tests
+backend documentation and OpenAPI contract
+
+The canonical frontend/backend boundary is:
+
+BoltAI
+   ↓
+OpenAPI / REST / JSON
+   ↓
+Oblivion Backend
+   ↓
+Security + Validation
+   ↓
+Core Engines
+   ↓
+Evidence / Assurance / Certificate
+3. DO NOT START CODING YET
+
+First perform a complete repository audit.
+
+Do not make destructive changes.
+
+Do not delete files.
+
+Do not rewrite the project.
+
+Do not install large dependencies merely because they might be useful.
+
+Do not start implementing features until the audit is complete.
+
+4. AUDIT THE ENTIRE REPOSITORY
+
+Inspect:
+
+directory structure
+source code
+backend
+frontend remnants
+configuration
+environment files
+database
+migrations
+API routes
+services
+utilities
+tests
+scripts
+Docker files
+build configuration
+package files
+Python files
+TypeScript/JavaScript files
+Rust/Go/C# or other native components if present
+documentation
+generated files
+secrets
+credentials
+hardcoded paths
+temporary files
+TODOs
+incomplete implementations
+dead code
+duplicate code
+
+Use the actual repository contents as evidence.
+
+Do not assume that a feature exists merely because documentation says it exists.
+
+5. SECURITY AUDIT — PRIORITY ONE
+
+Because Oblivion performs destructive filesystem operations, security correctness has priority over feature count.
+
+Audit specifically for:
+
+Filesystem safety
+
+Check:
+
+path traversal
+absolute/relative path confusion
+path canonicalization
+symlinks
+junctions
+NTFS reparse points
+alternate data streams
+long paths
+target substitution
+TOCTOU vulnerabilities
+race conditions
+filesystem identity validation
+protected system directories
+system/boot drive protection
+recursive deletion behavior
+hidden files
+read-only files
+locked files
+permission failures
+
+Determine whether the implementation can accidentally delete data outside the intended scope.
+
+If it can, classify this as CRITICAL.
+
+6. PRIVILEGE AUDIT
+
+Determine:
+
+whether the backend runs as administrator
+whether destructive operations run with excessive privileges
+whether a privileged service exists
+how the privileged service communicates with the API
+whether arbitrary commands can be executed
+whether PowerShell can be passed through the API
+whether CMD can be passed through the API
+whether executable paths can be supplied
+whether AI output can reach command execution
+
+The architecture MUST NOT expose:
+
+execute_command
+powershell
+cmd
+shell
+exec
+arbitrary executable
+arbitrary script
+
+as a general-purpose operation.
+
+Preferred architecture:
+
+Unprivileged API
+      ↓
+Authorization
+      ↓
+Operation validation
+      ↓
+Structured privileged request
+      ↓
+Minimal privileged service
+      ↓
+Filesystem operation
+7. DESTRUCTIVE OPERATION AUDIT
+
+Audit all deletion code.
+
+Determine exactly:
+
+what is deleted
+how it is deleted
+whether the target is revalidated
+whether the operation is atomic
+what happens on partial failure
+how progress is reported
+what happens if a file disappears during execution
+what happens if permissions change
+what happens if the target changes
+whether junctions/reparse points are followed
+whether system volumes can be selected
+whether the operation can escape its intended directory
+
+Do not make claims of universal irrecoverability.
+
+Use terminology such as:
+
+logical erasure
+supported recovery scope
+residual analysis
+recovery evidence
+assurance
+inconclusive
+8. RECOVERY ENGINE AUDIT
+
+Determine whether the repository actually has:
+
+baseline recovery
+post-erasure recovery
+controlled recovery testing
+hash comparison
+partial recovery handling
+inconclusive handling
+evidence generation
+
+Required result vocabulary:
+
+RECOVERED
+NOT_RECOVERED
+PARTIALLY_RECOVERED
+INCONCLUSIVE
+NOT_RUN
+
+Recovery testing must only operate on controlled test data/media.
+
+9. RECOVERY VAULT AUDIT
+
+Audit:
+
+encryption
+authenticated encryption
+key management
+key storage
+authorization
+restore destination validation
+retention
+expiry
+vault integrity
+recovery object format
+plaintext exposure
+logging
+
+The vault must use a vetted cryptographic library.
+
+Do not implement cryptographic primitives manually.
+
+Recovery keys must never be exposed through the frontend API.
+
+10. CRYPTOGRAPHY AUDIT
+
+Check all:
+
+hashing
+encryption
+signing
+key generation
+key storage
+random number generation
+certificate generation
+certificate verification
+
+Preferred:
+
+SHA-256
+AES-256-GCM
+Ed25519
+
+where appropriate and supported by the chosen libraries.
+
+Verify that cryptographic operations are implemented using established libraries.
+
+Check for:
+
+hardcoded secrets
+predictable keys
+static IVs/nonces
+reused nonces
+plaintext keys
+secrets in logs
+secrets in source control
+insecure serialization
+
+11. EVIDENCE AND CERTIFICATE AUDIT
+
+Determine whether evidence is:
+
+deterministic
+canonical
+tamper-evident
+signed
+independently verifiable
+
+Check whether the implementation signs canonical evidence rather than unstable JSON serialization.
+
+Check:
+
+evidence hash
+previous event hash
+event sequence
+operation ID
+target identity
+operation mode
+policy ID
+recovery result
+residual result
+assurance
+limitations
+timestamps
+software version
+signature
+
+Perform a conceptual tampering test:
+
+valid evidence → valid certificate
+
+modified evidence → invalid certificate
+
+12. AUTHENTICATION AND RBAC AUDIT
+
+Check:
+
+authentication
+password handling
+session/token handling
+authorization
+role enforcement
+recovery authorization
+destructive-operation authorization
+audit logging
+privilege escalation
+
+Roles should conceptually include:
+
+OPERATOR
+RECOVERY_AUTHORIZED
+AUDITOR
+ADMINISTRATOR
+
+Backend authorization is authoritative.
+
+Never rely on frontend role hiding for security.
+
+13. AI SECURITY AUDIT
+
+Audit the AI implementation.
+
+AI may:
+
+classify sensitive data
+classify residual artifacts
+assess qualitative recovery risk
+recommend an allowlisted policy
+explain recommendations
+
+AI MUST NOT:
+
+execute arbitrary commands
+delete files
+bypass authorization
+override safety checks
+retrieve secrets
+retrieve recovery keys
+modify evidence
+determine final authorization
+
+Check:
+
+prompt injection
+malicious file content
+untrusted model output
+schema validation
+timeouts
+retries
+provider failure
+data minimization
+plaintext sensitive-data transmission
+hallucinated recommendations
+
+The deterministic policy engine remains authoritative.
+
+14. OMNIROUTE AUDIT
+
+Inspect the actual Omniroute integration.
+
+Do not invent configuration.
+
+Check the repository/environment for:
+
+OMNIROUTE_BASE_URL
+OMNIROUTE_MODEL
+provider configuration
+authentication configuration
+API client implementation
+timeout
+retry behavior
+response schema
+structured output
+error handling
+
+The application should depend on an abstraction such as:
+
+AIProvider
+    ↓
+OmnirouteProvider
+
+not directly on provider-specific implementation throughout the application.
+
+Never hard-code real credentials.
+
+15. API AUDIT
+
+Compare the implementation against:
+
+docs/OPENAPI.yaml
+
+Check:
+
+endpoint completeness
+request schemas
+response schemas
+error schemas
+authentication
+authorization
+operation IDs
+long-running operation handling
+recovery endpoints
+certificate endpoints
+evidence endpoints
+
+Identify:
+
+IMPLEMENTED
+PARTIALLY_IMPLEMENTED
+MISSING
+INCONSISTENT
+UNSAFE
+
+The OpenAPI contract must eventually become the single source of truth for BoltAI integration.
+
+16. DATABASE AUDIT
+
+Check:
+
+schema
+migrations
+foreign keys
+indexes
+transaction boundaries
+concurrent operations
+operation state persistence
+recovery objects
+evidence
+audit events
+users/RBAC
+certificate metadata
+
+Check whether database state can become inconsistent with filesystem state.
+
+17. OPERATION STATE MACHINE AUDIT
+
+The expected state machine is:
+
+CREATED
+   ↓
+ANALYZING
+   ↓
+READY
+   ↓
+ERASING
+   ↓
+VERIFYING
+   ↓
+RECOVERY_TEST
+   ↓
+RESIDUAL_SCAN
+   ↓
+ASSESSING
+   ↓
+CERTIFYING
+   ↓
+COMPLETED
+
+Failure states:
+
+PARTIAL
+FAILED
+INCONCLUSIVE
+CANCELLED
+
+Check every transition.
+
+Check invalid transitions.
+
+Check restart/recovery after backend crashes.
+
+Check concurrent requests.
+
+Check duplicate requests.
+
+18. TEST AUDIT
+
+Determine:
+
+current test coverage
+unit tests
+integration tests
+security tests
+filesystem tests
+recovery tests
+certificate tests
+API tests
+AI tests
+frontend contract tests
+
+Do not test destructive features against personal data.
+
+Use synthetic controlled fixtures.
+
+Required end-to-end scenario:
+
+create synthetic file
+↓
+hash
+↓
+baseline recovery
+↓
+Oblivion permanent deletion
+↓
+post-recovery test
+↓
+residual scan
+↓
+assurance
+↓
+certificate
+↓
+certificate verification
+
+Second scenario:
+
+create synthetic file
+↓
+hash
+↓
+controlled recoverable deletion
+↓
+original removed
+↓
+unauthorized restore blocked
+↓
+authorized restore
+↓
+SHA-256 matches
+
+Third scenario:
+
+valid certificate
+↓
+modify evidence
+↓
+verification fails
+
+19. PERFORMANCE AUDIT
+
+Look for:
+
+entire large files loaded into memory
+unnecessary duplicate hashing
+blocking API calls
+unbounded concurrency
+inefficient directory traversal
+excessive AI calls
+unnecessary network calls
+database bottlenecks
+
+Hash large files using streaming.
+
+Keep memory bounded.
+
+20. FRONTEND INTEGRATION AUDIT
+
+Do not build the frontend.
+
+Instead determine whether the backend is ready for BoltAI.
+
+Verify that BoltAI can obtain:
+
+target analysis
+storage profile
+sensitivity
+warnings
+operation ID
+operation state
+progress
+errors
+evidence events
+recovery objects
+restore result
+assurance
+certificate
+verification result
+
+Every important backend state must be representable by the API.
+
+21. PRODUCE AN AUDIT REPORT
+
+Create:
+
+AUDIT_REPORT.md
+
+at the repository root.
+
+Use this structure:
+
+# Oblivion Repository Audit
+
+## 1. Executive Summary
+
+## 2. Repository Structure
+
+## 3. Current Technology Stack
+
+## 4. Implemented Features
+
+## 5. Missing Features
+
+## 6. Partially Implemented Features
+
+## 7. Architecture Findings
+
+## 8. Critical Security Findings
+
+## 9. Filesystem Safety Findings
+
+## 10. Privilege Boundary Findings
+
+## 11. Cryptography Findings
+
+## 12. Recovery Vault Findings
+
+## 13. Recovery Engine Findings
+
+## 14. Residual Analysis Findings
+
+## 15. AI Security Findings
+
+## 16. Omniroute Findings
+
+## 17. API/OpenAPI Findings
+
+## 18. Database Findings
+
+## 19. State Machine Findings
+
+## 20. Testing Findings
+
+## 21. Performance Findings
+
+## 22. BoltAI Integration Readiness
+
+## 23. SIH Demo Readiness
+
+## 24. Technical Debt
+
+## 25. Recommended Fix Order
+
+## 26. Risk Register
+
+## 27. Overall Readiness Score
+
+Classify findings:
+
+CRITICAL
+HIGH
+MEDIUM
+LOW
+INFO
+
+For each finding include:
+
+ID
+Severity
+Location
+Problem
+Why it matters
+Evidence
+Recommended fix
+Validation method
+
+Do not make vague statements.
+
+Give exact files/functions/classes/lines where possible.
+
+22. CREATE A REMEDIATION PLAN
+
+After the audit, create:
+
+REMEDIATION_PLAN.md
+
+Organize it:
+
+Phase 0 — Critical Security Fixes
+
+Anything that can:
+
+delete unintended data
+expose secrets
+bypass authorization
+execute arbitrary commands
+corrupt evidence
+compromise recovery keys
+
+must be addressed first.
+
+Phase 1 — Core Correctness
+state machine
+target validation
+erasure
+recovery
+residual scanning
+evidence
+Phase 2 — Security
+RBAC
+vault
+cryptography
+privilege boundary
+audit
+Phase 3 — AI
+sensitivity
+residual classification
+risk
+recommendation
+Omniroute
+Phase 4 — BoltAI Integration
+OpenAPI correctness
+API errors
+operation polling
+certificate verification
+frontend contract tests
+Phase 5 — Demo
+synthetic demo data
+end-to-end flow
+benchmark
+polished API behavior
+23. THEN BEGIN IMPLEMENTATION
+
+Only after:
+
+reading the reference documentation
+auditing the repository
+writing AUDIT_REPORT.md
+writing REMEDIATION_PLAN.md
+
+begin implementation.
+
+Do NOT attempt to implement everything at once.
+
+Use vertical slices.
+
+Start with the highest-priority safe end-to-end path:
+
+Target Analysis
+↓
+SHA-256
+↓
+Dry Run
+↓
+Safety Validation
+↓
+Permanent Deletion
+↓
+Recovery Test
+↓
+Residual Scan
+↓
+Assurance
+↓
+Evidence
+↓
+Certificate
+↓
+Verification
+
+Then implement:
+
+Controlled Recoverable Deletion
+↓
+Encrypted Recovery Vault
+↓
+Authorization
+↓
+Restore
+↓
+Hash Verification
+
+Then:
+
+AI Sensitivity
+↓
+Risk Analysis
+↓
+Policy Recommendation
+24. CODING RULES
+
+Before every significant change:
+
+understand the existing implementation
+identify dependencies
+check security implications
+make the smallest coherent change
+run relevant tests
+inspect failures
+update documentation/API contract
+do not leave partially implemented security behavior
+
+Never create fake implementations merely to make an endpoint return success.
+
+Never replace a real security check with:
+
+TODO
+pass
+return true
+return {"success": true}
+
+Never silently downgrade a security failure into success.
+
+25. DESTRUCTIVE FEATURE RULE
+
+Before implementing or modifying destructive filesystem code, create or update tests using an isolated synthetic test directory/volume.
+
+Never test against:
+
+C:\
+Windows\
+Program Files\
+Program Files (x86)\
+Users\<real-user-data>\
+system volumes
+
+unless a dedicated non-destructive inspection test explicitly requires it.
+
+Default to refusing system-drive operations.
+
+26. CLAIM DISCIPLINE
+
+The product must never claim:
+
+"The data cannot be recovered by any method."
+
+Instead report:
+
+"Recovery was not successful within the supported test scope."
+
+Similarly, never claim that software has physically sanitized every SSD/NVMe NAND cell unless a verified device-specific sanitization mechanism actually performed that operation.
+
+27. OUTPUT AFTER THE AUDIT
+
+When the audit is complete, do NOT immediately dump thousands of lines of explanation into the terminal.
+
+Give me a concise summary containing:
+
+AUDIT COMPLETE
+
+Repository:
+<summary>
+
+Stack:
+<summary>
+
+Overall readiness:
+<score>
+
+CRITICAL:
+<count>
+
+HIGH:
+<count>
+
+MEDIUM:
+<count>
+
+LOW:
+<count>
+
+Top 10 findings:
+1.
+2.
+3. ...
+
+Current implementation:
+<summary>
+
+Missing core functionality:
+<summary>
+
+Security status:
+<summary>
+
+BoltAI readiness:
+<summary>
+
+Recommended next action:
+<single highest-priority action>
+
+The detailed findings must be saved in:
+
+AUDIT_REPORT.md
+
+and the implementation sequence in:
+
+REMEDIATION_PLAN.md
+
+Do not ask me for permission to perform the audit.
+
+Perform the audit now.
+
+Only after the audit is complete should you begin fixing the repository.
+"""
+
+print("Prompt ready.")
+print(len(files["CLAUDE.md"]), "characters in master instructions")
+print(len("""AUDIT PROMPT"""), "placeholder")
+
+Also save the prompt as a reusable text file.
+
+prompt = Path("/mnt/data/Oblivion_Claude_Code_Audit_Start_Prompt.txt")
+prompt.write_text("""PASTE THE FOLLOWING INTO CLAUDE CODE FROM THE ROOT OF THE OBLIVION REPOSITORY:\n\n""" + files["CLAUDE.md"], encoding="utf-8")
+print(prompt)
+print("Files in reference pack:", zip_path)
+print("Audit prompt saved:", prompt)
+print("Reference pack path:", zip_path)
+print("Note: use the full prompt above; the saved file contains the master configuration text.")
+print("The detailed audit instructions are in the response text.")
+print("Prompt length:", len(files["CLAUDE.md"]))
+print("Ready.")
+print("Saved to:", prompt)
+print("Pack:", zip_path)
+print("Done.")
+print("Use this prompt before implementation.")
+print("End.")
