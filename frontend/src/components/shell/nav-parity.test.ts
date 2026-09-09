@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { NAV_ITEMS, ALL_NAV_SECTIONS, findNavByPath } from '@/components/shell/nav'
 import { router } from '@/app/router'
 import { ROLE_DEFAULT_PERMISSIONS } from '@/lib/auth/permissions'
+import { makeUser } from '@/test/factories'
 import type { User } from '@/lib/auth/types'
 
 /**
@@ -72,13 +73,8 @@ describe('navigation / route parity', () => {
 })
 
 describe('administration is reachable only to managers', () => {
-  const admin = (role: keyof typeof ROLE_DEFAULT_PERMISSIONS): User => ({
-    id: `u-${role}`,
-    username: `u-${role}`,
-    displayName: role,
-    role,
-    permissions: [...ROLE_DEFAULT_PERMISSIONS[role]],
-  })
+  const admin = (role: keyof typeof ROLE_DEFAULT_PERMISSIONS): User =>
+    makeUser({ id: `u-${role}`, username: `u-${role}`, displayName: role, role })
 
   it('has its own path distinct from settings', () => {
     const administration = NAV_ITEMS.find((i) => i.id === 'administration')

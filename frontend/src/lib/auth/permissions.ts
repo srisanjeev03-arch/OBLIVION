@@ -1,10 +1,17 @@
 import type { Role, PermissionKey, User } from './types'
 
 /**
- * Centralized Role Permission Mapping.
+ * Reference role → permission mapping.
  *
- * NOTE: Frontend permissions are for UX visibility and workflow ergonomics only.
- * The backend remains authoritative for all authentication, authorization, and operation validation.
+ * THIS TABLE GRANTS NOTHING. It exists for exactly two purposes:
+ *   1. to give the development personas in `devAuth.ts` a realistic permission set without a
+ *      backend, and
+ *   2. to let the tests reason about role shape.
+ *
+ * A real session's permissions come from `/api/auth/me` and nowhere else. The backend computes
+ * them from its own `ROLE_PERMISSIONS` map and enforces them on every request; this copy is
+ * allowed to disagree with it and the backend still wins. That is the point of keeping them
+ * separate: hiding a control is a usability affordance, never a security boundary.
  */
 export const ROLE_DEFAULT_PERMISSIONS: Readonly<Record<Role, readonly PermissionKey[]>> = {
   ADMIN: [
@@ -120,11 +127,16 @@ export function hasAllPermissions(
   return permissions.every((p) => user.permissions.includes(p))
 }
 
-/** Check if user matches a specific role or one of multiple roles. */
+/**
+ * Check if a user holds a role.
+ *
+ * Tests the full granted set, not just `user.role`: the backend can issue several roles at once,
+ * and a check that looked only at the primary role would deny an action the operator is entitled
+ * to. Denying on a frontend check is at least fail-closed, but it is still a bug the operator sees.
+ */
 export function hasRole(user: User | null | undefined, role: Role | readonly Role[]): boolean {
   if (!user) return false
-  if (Array.isArray(role)) {
-    return role.includes(user.role)
-  }
-  return user.role === role
+  const granted: readonly Role[] = user.roles?.length ? user.roles : [user.role]
+  const wanted: readonly Role[] = typeof role === 'string' ? [role] : role
+  return wanted.some((r) => granted.includes(r))
 }

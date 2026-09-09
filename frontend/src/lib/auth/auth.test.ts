@@ -10,6 +10,7 @@ import {
 import { useAuthStore } from './store'
 import { DEV_PERSONAS, devLogin, devLogout, isDevAuthEnabled } from './devAuth'
 import { getNavSectionsForUser } from '@/components/shell/nav'
+import { makeUser } from '@/test/factories'
 
 describe('5-Role RBAC Model & Metadata', () => {
   it('defines exactly the 5 primary application roles', () => {
@@ -35,13 +36,13 @@ describe('5-Role RBAC Model & Metadata', () => {
 })
 
 describe('Permission Helpers', () => {
-  const sampleUser: User = {
+  const sampleUser: User = makeUser({
     id: 'user-test-1',
     username: 'test.investigator',
     displayName: 'Test Investigator',
     role: 'INVESTIGATOR',
     permissions: ['case.create', 'case.view', 'file_erasure.request', 'evidence.view'],
-  }
+  })
 
   it('evaluates hasPermission correctly', () => {
     expect(hasPermission(sampleUser, 'case.create')).toBe(true)
@@ -128,13 +129,12 @@ describe('Critical Separation of Duties (SoD) Rules', () => {
 
 describe('Role-Aware Navigation & Workspaces', () => {
   it('filters navigation sections appropriately for VIEWER (read-only)', () => {
-    const viewerUser: User = {
+    const viewerUser: User = makeUser({
       id: 'v1',
       username: 'viewer',
       displayName: 'Viewer',
       role: 'VIEWER',
-      permissions: [...ROLE_DEFAULT_PERMISSIONS.VIEWER],
-    }
+    })
 
     const sections = getNavSectionsForUser(viewerUser)
     const allItems = sections.flatMap((s) => s.items)
@@ -151,13 +151,12 @@ describe('Role-Aware Navigation & Workspaces', () => {
   })
 
   it('filters navigation sections appropriately for INVESTIGATOR', () => {
-    const invUser: User = {
+    const invUser: User = makeUser({
       id: 'i1',
       username: 'investigator',
       displayName: 'Investigator',
       role: 'INVESTIGATOR',
-      permissions: [...ROLE_DEFAULT_PERMISSIONS.INVESTIGATOR],
-    }
+    })
 
     const sections = getNavSectionsForUser(invUser)
     const allItems = sections.flatMap((s) => s.items)

@@ -14,8 +14,9 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "gen:api": "openapi-typescript ./contract/OPENAPI.yaml -o ./src/lib/api/schema.d.ts",
-    "check": "npm run typecheck && npm run lint && npm run test && npm run build"
+    "gen:api": "openapi-typescript ../docs/OPENAPI.yaml -o ./src/lib/api/schema.d.ts",
+    "check:contract": "python ../scripts/gen_openapi.py --check",
+    "check": "npm run check:contract && npm run typecheck && npm run lint && npm run test && npm run build"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",

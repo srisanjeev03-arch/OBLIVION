@@ -122,7 +122,11 @@ function toUser(persona: DevPersona): User {
     username: persona.username,
     displayName: persona.displayName,
     role: persona.role,
+    roles: [persona.role],
     permissions: [...persona.permissions],
+    // Dev personas are assembled from this file's own table, never from the backend, so there is
+    // nothing unrecognised to report. The field stays to keep the dev and real shapes identical.
+    unrecognizedPermissions: [],
     email: `${persona.username}@oblivion.local`,
   }
 }

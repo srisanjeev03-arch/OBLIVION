@@ -26,14 +26,10 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     )
   }
 
-  // UNAVAILABLE (no published token endpoint) and UNAUTHENTICATED (credential rejected/absent)
-  // both land on /login, which renders a different explanation for each. They are kept as
-  // separate states in the store so that screen can tell the truth.
-  if (authState === 'UNAVAILABLE' || authState === 'ERROR') {
-    return <Navigate to="/login" state={{ from: location }} replace />
-  }
-
-  if (authState === 'UNAUTHENTICATED' || !user) {
+  // ERROR means the last resolution attempt failed for a reason other than a clean "no session";
+  // UNAUTHENTICATED means no usable credential is held. Both route to /login, which reports the
+  // difference. Neither is ever rendered as a signed-in screen.
+  if (authState === 'UNAUTHENTICATED' || authState === 'ERROR' || !user) {
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 

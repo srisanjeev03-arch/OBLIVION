@@ -46,35 +46,41 @@ describe('application boot', () => {
 
   it('exposes a working useAuth() to anything under the router', async () => {
     renderWholeApp()
-    await waitFor(() => expect(screen.getByTestId('auth-contract-gap')).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /authenticate session/i })).toBeInTheDocument(),
+    )
 
     const { result } = renderHook(() => useAuth(), {
       wrapper: ({ children }) => (
         <AuthProvider sessionSource={devPersonaSessionSource}>{children}</AuthProvider>
       ),
     })
-    await waitFor(() => expect(result.current.authState).toBe('UNAVAILABLE'))
+    await waitFor(() => expect(result.current.authState).toBe('UNAUTHENTICATED'))
     expect(result.current.isDevSession).toBe(false)
     expect(result.current.sessionSourceId).toBe('dev-persona')
   })
 
-  it('shows the auth contract gap rather than a working login form', async () => {
+  it('renders a working login form wired to the published auth endpoint', async () => {
     renderWholeApp()
-    const gap = await screen.findByTestId('auth-contract-gap')
-    expect(gap.textContent).toMatch(/no endpoint that issues/)
-    expect(gap.textContent).toMatch(/bearerAuth/)
+    // Settle the mount-time session restore before asserting, so the form is inspected at rest
+    // rather than mid-resolution.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /authenticate session/i })).toBeEnabled(),
+    )
 
-    const submit = screen.getByRole('button', { name: /authentication unavailable/i })
-    expect(submit).toBeDisabled()
+    const submit = screen.getByRole('button', { name: /authenticate session/i })
+    expect(submit).toBeEnabled()
+    expect(screen.getByLabelText(/operator username/i)).toBeEnabled()
+    expect(screen.getByLabelText(/passphrase/i)).toBeEnabled()
 
-    const disabledFields = screen.getAllByPlaceholderText(/unavailable - no token endpoint/i)
-    expect(disabledFields).toHaveLength(2)
-    for (const field of disabledFields) {
-      expect(field).toBeDisabled()
-    }
+    // The gap that used to dominate this screen is gone; the honest limits are still stated.
+    expect(screen.queryByTestId('auth-contract-gap')).not.toBeInTheDocument()
+    expect(screen.getByText(/session posture/i)).toBeInTheDocument()
+    expect(screen.getByText(/memory only/i)).toBeInTheDocument()
+    expect(screen.getByText(/no refresh endpoint/i)).toBeInTheDocument()
 
     // No fabricated success language anywhere on the sign-in screen.
-    expect(gap.textContent).not.toMatch(/authenticated successfully/i)
+    expect(document.body.textContent).not.toMatch(/authenticated successfully/i)
     expect(document.body.textContent).not.toMatch(/welcome back/i)
   })
 

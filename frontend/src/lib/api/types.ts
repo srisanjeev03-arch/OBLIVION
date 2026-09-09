@@ -89,7 +89,19 @@ export interface RestoreRequest {
   destination: string
 }
 
-/** Standard error envelope from docs/API.md. Not yet in OPENAPI.yaml — tracked as a contract gap. */
+/**
+ * Error envelope as *documented* in docs/API.md: nested under `error`.
+ *
+ * IMPORTANT: the backend does not currently emit this shape. It answers with the flat form below
+ * (see `FastAPI`'s handlers in `src/oblivion/api/app.py`, which pass `detail` through as
+ * `{"error_code": ..., "message": ...}`). Verified live:
+ *
+ *   401 -> {"error_code": "UNAUTHENTICATED",   "message": "Authentication required"}
+ *   401 -> {"error_code": "INVALID_CREDENTIALS","message": "Invalid username or password"}
+ *
+ * Both shapes are accepted so the console works against the backend as it is today while remaining
+ * correct if the documented envelope is ever adopted. Neither shape is invented here.
+ */
 export interface ApiErrorEnvelope {
   error: {
     code: string
@@ -97,6 +109,23 @@ export interface ApiErrorEnvelope {
     retryable?: boolean
     request_id?: string
   }
+}
+
+/** The shape the backend actually returns. */
+export interface FlatApiErrorEnvelope {
+  error_code: string
+  message: string
+  retryable?: boolean
+  request_id?: string
+  details?: unknown
+}
+
+/** Normalised view of either envelope. */
+export interface NormalisedApiError {
+  code: string
+  message: string
+  retryable?: boolean
+  requestId?: string
 }
 
 export function isApiErrorEnvelope(value: unknown): value is ApiErrorEnvelope {
@@ -108,4 +137,36 @@ export function isApiErrorEnvelope(value: unknown): value is ApiErrorEnvelope {
     typeof (err as { code?: unknown }).code === 'string' &&
     typeof (err as { message?: unknown }).message === 'string'
   )
+}
+
+export function isFlatApiErrorEnvelope(value: unknown): value is FlatApiErrorEnvelope {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as { error_code?: unknown; message?: unknown }
+  return typeof v.error_code === 'string' && typeof v.message === 'string'
+}
+
+/**
+ * Read either error envelope into one shape, or return null when the body matches neither.
+ *
+ * Returning null (rather than a default) is deliberate: the caller then falls back to the HTTP
+ * status text and we never invent a backend error code that was not sent.
+ */
+export function normaliseApiErrorBody(value: unknown): NormalisedApiError | null {
+  if (isApiErrorEnvelope(value)) {
+    return {
+      code: value.error.code,
+      message: value.error.message,
+      retryable: value.error.retryable,
+      requestId: value.error.request_id,
+    }
+  }
+  if (isFlatApiErrorEnvelope(value)) {
+    return {
+      code: value.error_code,
+      message: value.message,
+      retryable: value.retryable,
+      requestId: value.request_id,
+    }
+  }
+  return null
 }

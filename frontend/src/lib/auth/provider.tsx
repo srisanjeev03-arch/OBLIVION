@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
+﻿import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useAuthStore } from './store'
 import {
   backendContractSessionSource,
@@ -6,26 +6,22 @@ import {
   type SessionSource,
 } from './sessionSource'
 import { devLogin, devPersonaSessionSource, isDevAuthEnabled } from './devAuth'
-import { AUTH_CONTRACT_NOT_PUBLISHED_CODE, AUTH_TOKEN_ISSUANCE_PUBLISHED } from './authContract'
 import { subscribeToAuthEvents } from '@/lib/api/authEvents'
-import { describeApiError } from '@/lib/api/errors'
+import { ApiError, describeApiError } from '@/lib/api/errors'
 import { AuthContext } from './context'
 import type { AuthContextType, PermissionKey, Role, User } from './types'
 
 /**
- * What "no session" means right now. With no published token endpoint the client is not merely
- * logged out, it is unable to log in — a materially different fact that deserves its own state.
+ * What "no session" means right now. The contract publishes a token endpoint, so the honest
+ * answer is simply UNAUTHENTICATED.
  */
-function noSessionState(): 'UNAVAILABLE' | 'UNAUTHENTICATED' {
-  return AUTH_TOKEN_ISSUANCE_PUBLISHED ? 'UNAUTHENTICATED' : 'UNAVAILABLE'
-}
 
 export function AuthProvider({
   children,
   sessionSource,
 }: {
   children: ReactNode
-  /** Test seam. Defaults to the DEV persona source under `import.meta.env.DEV`, else the contract. */
+  /** Test seam. Defaults to the DEV persona source under `import.meta.env.DEV`, else the backend. */
   sessionSource?: SessionSource
 }) {
   const user = useAuthStore((s) => s.user)
@@ -63,9 +59,11 @@ export function AuthProvider({
           s.setError(null)
           return
         }
+        // Nothing to resume: the bearer token is memory-only, so a fresh document starts
+        // unauthenticated. That is the documented posture, not a failure.
         s.setUser(null)
         s.setSession(null)
-        s.setAuthState(noSessionState())
+        s.setAuthState('UNAUTHENTICATED')
         s.setError(null)
       })
       .catch((err: unknown) => {
@@ -92,7 +90,7 @@ export function AuthProvider({
         if (event.kind === 'unauthenticated') {
           s.setSession(null)
           s.setUser(null)
-          s.setAuthState(noSessionState())
+          s.setAuthState('UNAUTHENTICATED')
           s.setError(
             'The backend rejected the bearer credential (401). A new session is required.',
           )
@@ -106,14 +104,15 @@ export function AuthProvider({
           at: new Date().toISOString(),
         })
       }),
-    [],
+  [],
   )
 
   /**
-   * Real sign-in. Always routed at `backendContractSessionSource`, never at the dev persona
-   * source, so a rejected credential can never quietly resolve into a simulated session. While
-   * the contract publishes no token endpoint this rejects with AUTH_CONTRACT_NOT_PUBLISHED and
-   * the UI renders the gap.
+   * Real sign-in.
+   *
+   * Always routed at `backendContractSessionSource`, never at the resolved `source`, so a rejected
+   * credential can never quietly resolve into a simulated dev session. A failure is surfaced as a
+   * failure; nothing here falls back.
    */
   const login = useCallback(
     async (credentials: { username: string; password: string }) => {
@@ -129,21 +128,19 @@ export function AuthProvider({
         after.setSession(resolved.session)
         after.setAuthState('AUTHENTICATED')
         after.setError(null)
+        // A new principal may hold different permissions and may only be entitled to a subset of
+        // what the previous one cached.
       } catch (err: unknown) {
         const after = useAuthStore.getState()
         after.setUser(null)
         after.setSession(null)
         const summary = describeApiError(err)
         after.setError(`${summary.title}: ${summary.detail}`)
-        after.setAuthState(
-          err instanceof Error && 'code' in err && err.code === AUTH_CONTRACT_NOT_PUBLISHED_CODE
-            ? 'UNAVAILABLE'
-            : 'ERROR',
-        )
+        after.setAuthState('ERROR')
         throw err
       }
     },
-    [],
+  [],
   )
 
   /**
@@ -153,7 +150,7 @@ export function AuthProvider({
   const signInWithDevPersona = useCallback((personaId: string): User => {
     if (!isDevAuthEnabled()) {
       const s = useAuthStore.getState()
-      s.setAuthState(noSessionState())
+      s.setAuthState('UNAUTHENTICATED')
       s.setError('Development personas are not available in this build.')
       throw new Error('Development personas are not available in this build.')
     }
@@ -161,9 +158,17 @@ export function AuthProvider({
     return devLogin(personaId)
   }, [])
 
+  /**
+   * Logout.
+   *
+   * The local credential is always cleared â€” leaving it behind would be worse than any reporting
+   * failure. What must not be papered over is the difference between "the backend revoked this
+   * session" and "we forgot about it". If the revocation call fails the operator is told the
+   * credential may still be live server-side, because a forgotten token is not a revoked one.
+   */
   const logout = useCallback(async () => {
     const before = useAuthStore.getState().session
-    let revocationUnavailable = false
+    let revocationFailed: string | null = null
     try {
       if (before?.source === 'dev-persona') {
         await devPersonaSessionSource.revoke()
@@ -171,19 +176,22 @@ export function AuthProvider({
         await backendContractSessionSource.revoke()
       }
     } catch (err: unknown) {
-      revocationUnavailable =
-        err instanceof Error && 'code' in err && err.code === AUTH_CONTRACT_NOT_PUBLISHED_CODE
+      revocationFailed =
+        err instanceof ApiError
+          ? `${err.kind}${err.status ? ` ${err.status}` : ''}`
+          : err instanceof Error
+            ? err.message
+            : 'unknown error'
     } finally {
       useAuthStore.getState().reset()
-      useAuthStore.getState().setAuthState(noSessionState())
+      useAuthStore.getState().setAuthState('UNAUTHENTICATED')
     }
-    if (revocationUnavailable) {
-      // Honest bookkeeping: the local credential is gone but the backend was never told,
-      // because no revocation endpoint is published. Clearing local state is not a logout.
+    if (revocationFailed !== null) {
       useAuthStore.getState().setNotice({
         kind: 'revocation_incomplete',
         message:
-          'Local session cleared. Server-side revocation is not published in the contract, so the credential may remain valid at the backend.',
+          `Local session cleared, but server-side revocation failed (${revocationFailed}). ` +
+          'The bearer token may still be accepted by the backend until it expires.',
         path: '/api/auth/logout',
         at: new Date().toISOString(),
       })

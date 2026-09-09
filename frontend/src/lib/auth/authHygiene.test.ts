@@ -46,16 +46,24 @@ describe('auth hygiene: no cookie-based authentication', () => {
   })
 })
 
-describe('auth hygiene: no invented backend endpoints', () => {
-  it('the auth API module performs no network request at all', () => {
+describe('auth hygiene: auth calls go through exactly one door', () => {
+  it('the auth API module uses the shared client and never hand-rolls a request', () => {
     const source = textOf(join(SRC, 'lib', 'api', 'auth.ts'))
-    expect(source).not.toMatch(/from '\.\/client'/)
+    expect(source).toMatch(/from '\.\/client'/)
+    // No second transport: auth must not bypass base-URL, bearer-attachment and error handling.
     expect(source).not.toMatch(/\bfetch\(/)
-    expect(source).not.toMatch(/\brequest[<(]/)
+    expect(source).not.toMatch(/new XMLHttpRequest/)
+    expect(source).not.toMatch(/Authorization['"]?\s*[:=]/)
   })
 
-  it('no source file issues a request to an /api/auth path', () => {
-    expect(matching(/request[^\n]*\(\s*['"`]\/api\/auth/)).toEqual([])
+  it('only the auth API module addresses /api/auth paths', () => {
+    // Widening this list means a second component started minting credentials.
+    expect(matching(/request[<(][^\n]*['"`]\/api\/auth/)).toEqual(['lib/api/auth.ts'])
+  })
+
+  it('no module outside the transport assigns an Authorization header', () => {
+    // The transport owns the credential. Anything else risks a second, unreviewed auth path.
+    expect(matching(/Authorization['"]?\s*[:=]/)).toEqual(['lib/api/client.ts'])
   })
 })
 
@@ -108,15 +116,37 @@ describe('auth hygiene: no fake security-success states', () => {
 })
 
 describe('OpenAPI stays the source of truth', () => {
-  const contract = readFileSync(join(process.cwd(), 'contract', 'OPENAPI.yaml'), 'utf8')
+  // The frontend no longer vendors a copy of the contract: a second file is a second source of
+  // truth, and it was exactly that copy which went stale and made the console refuse a backend
+  // that had supported login all along. It reads the repository's generated document instead.
+  const contract = readFileSync(join(process.cwd(), '..', 'docs', 'OPENAPI.yaml'), 'utf8')
 
   it('declares the bearer scheme the transport implements', () => {
     expect(contract).toMatch(/bearerAuth:\s*\n\s*type:\s*http\s*\n\s*scheme:\s*bearer/)
     expect(contract).toMatch(/security:\s*\n\s*-\s*bearerAuth:/)
   })
 
-  it('still publishes no auth path, and the frontend agrees', () => {
+  it('does not mislabel the opaque session token as a JWT', () => {
+    // The backend mints secrets.token_urlsafe(32). Claiming JWT would invite a client to parse
+    // claims that are not there.
+    expect(contract).not.toMatch(/bearerFormat:\s*JWT/)
+    expect(contract).toMatch(/bearerFormat:\s*OpaqueSessionToken/)
+  })
+
+  it('publishes the auth paths, and the frontend agrees', () => {
     const hasAuthPath = /^\s{2}\/api\/auth/m.test(contract)
     expect(hasAuthPath).toBe(AUTH_TOKEN_ISSUANCE_PUBLISHED)
+    expect(contract).toMatch(/^\s{2}\/api\/auth\/login:/m)
+    expect(contract).toMatch(/^\s{2}\/api\/auth\/me:/m)
+    expect(contract).toMatch(/^\s{2}\/api\/auth\/logout:/m)
+  })
+
+  it('generates its types from that same document, not a hand-written twin', () => {
+    const pkg = JSON.parse(
+      readFileSync(join(process.cwd(), 'package.json'), 'utf8'),
+    ) as { scripts: Record<string, string> }
+    expect(pkg.scripts['gen:api']).toMatch(/\.\.\/docs\/OPENAPI\.yaml/)
+    // A vendored copy under contract/ would silently diverge from the backend.
+    expect(() => statSync(join(process.cwd(), 'contract'))).toThrow()
   })
 })

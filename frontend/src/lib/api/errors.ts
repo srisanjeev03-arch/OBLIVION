@@ -1,4 +1,4 @@
-import { isApiErrorEnvelope } from './types'
+import { normaliseApiErrorBody } from './types'
 
 export type ApiErrorKind =
   /** Backend capability is not implemented / not in the contract. No request was made. */
@@ -100,7 +100,7 @@ export function isApiError(value: unknown): value is ApiError {
   return value instanceof ApiError
 }
 
-/** Builds an ApiError from a non-2xx Response, honouring the docs/API.md envelope when present. */
+/** Builds an ApiError from a non-2xx Response, honouring either documented error envelope. */
 export async function apiErrorFromResponse(response: Response): Promise<ApiError> {
   let body: unknown = undefined
   try {
@@ -108,14 +108,15 @@ export async function apiErrorFromResponse(response: Response): Promise<ApiError
   } catch {
     body = undefined
   }
-  if (isApiErrorEnvelope(body)) {
+  const envelope = normaliseApiErrorBody(body)
+  if (envelope) {
     return new ApiError({
       kind: 'http',
       status: response.status,
-      code: body.error.code,
-      message: body.error.message,
-      retryable: body.error.retryable,
-      requestId: body.error.request_id ?? response.headers.get('x-request-id') ?? undefined,
+      code: envelope.code,
+      message: envelope.message,
+      retryable: envelope.retryable,
+      requestId: envelope.requestId ?? response.headers.get('x-request-id') ?? undefined,
     })
   }
   return new ApiError({
@@ -177,8 +178,11 @@ export function describeApiError(error: unknown): ApiErrorSummary {
         if (error.isUnauthenticated) {
           return {
             title: 'Session not authenticated',
+            // The backend's own wording is more useful than a generic sentence, and on a login
+            // attempt the generic one is simply wrong: there was no bearer credential to reject.
             detail:
-              'The backend rejected the bearer credential (401). Sign in again to obtain a new one.',
+              error.message?.trim() ||
+              'The backend did not accept a credential for this request (401). Sign in again to obtain a new one.',
             code: error.code,
             retryable: false,
             requestId: error.requestId,
@@ -188,6 +192,7 @@ export function describeApiError(error: unknown): ApiErrorSummary {
           return {
             title: 'Permission denied',
             detail:
+              error.message?.trim() ||
               'The backend accepted your session but refused this action (403). Your session remains valid.',
             code: error.code,
             retryable: false,

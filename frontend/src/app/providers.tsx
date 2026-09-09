@@ -4,6 +4,7 @@ import { resolveTheme, usePrefs } from '@/lib/prefs'
 import { resolveThemeVariables } from '@/lib/themes'
 import { isApiError } from '@/lib/api/errors'
 import { AuthProvider } from '@/lib/auth/provider'
+import { SessionCacheBoundary } from './SessionCacheBoundary'
 
 function createQueryClient(): QueryClient {
   return new QueryClient({
@@ -90,7 +91,10 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>{children}</AuthProvider>
+      <AuthProvider>
+        <SessionCacheBoundary />
+        {children}
+      </AuthProvider>
     </QueryClientProvider>
   )
 }

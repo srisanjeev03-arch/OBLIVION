@@ -120,6 +120,50 @@ export type PermissionKey =
   | 'permission.manage'
   | 'system.configure'
 
+/**
+ * Every permission key the backend's `Permission` enum can grant, as a runtime value.
+ *
+ * The union above is erased at compile time, so validating what `/api/auth/me` actually returned
+ * needs the list itself. Keeping it here rather than re-deriving it means the type and the
+ * validator cannot silently disagree: `auth.test.ts` asserts this array covers the union exactly.
+ */
+export const PERMISSION_KEYS: readonly PermissionKey[] = [
+  'case.create',
+  'case.view',
+  'case.update',
+  'case.close',
+  'evidence.import',
+  'evidence.view',
+  'evidence.hash',
+  'evidence.verify',
+  'file_erasure.request',
+  'file_erasure.execute',
+  'drive_sanitization.request',
+  'drive_sanitization.execute',
+  'recovery.view',
+  'recovery.execute',
+  'operation.view',
+  'operation.request',
+  'operation.approve',
+  'operation.execute',
+  'operation.verify',
+  'audit.view',
+  'audit.verify',
+  'report.export',
+  'user.manage',
+  'role.manage',
+  'permission.manage',
+  'system.configure',
+] as const
+
+export function isRole(value: string): value is Role {
+  return (ROLES as readonly string[]).includes(value)
+}
+
+export function isPermissionKey(value: string): value is PermissionKey {
+  return (PERMISSION_KEYS as readonly string[]).includes(value)
+}
+
 export type AuthState =
   /** Nothing resolved yet; the provider is about to attempt it. */
   | 'UNKNOWN'
@@ -131,20 +175,28 @@ export type AuthState =
   | 'UNAUTHENTICATED'
   /** The last attempt failed for a reason other than a clean "no session". */
   | 'ERROR'
-  /**
-   * Authentication cannot be attempted at all: the OpenAPI contract publishes no token-issuing
-   * endpoint. Distinct from UNAUTHENTICATED on purpose — "we are not logged in" and "there is
-   * nowhere to log in to" are different facts and must not share a screen.
-   */
-  | 'UNAVAILABLE'
 
 export interface User {
   id: string
   username: string
   displayName: string
+  /**
+   * Primary role, used for badge colouring and level ordering. The backend grants a SET of roles,
+   * so this is the highest-privilege one rather than the only one.
+   */
   role: Role
+  /** Every role the backend actually granted, in descending privilege order. */
+  roles: Role[]
   permissions: PermissionKey[]
+  /**
+   * Permission strings the backend granted that this build does not know about. Surfaced instead
+   * of dropped so a backend that widens its enum shows up as a visible gap rather than a silent
+   * loss of capability.
+   */
+  unrecognizedPermissions: string[]
   email?: string
+  /** True when the backend reports the account disabled. Kept for honest display. */
+  disabled?: boolean
 }
 
 /**

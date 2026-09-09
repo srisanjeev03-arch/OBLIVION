@@ -2,17 +2,14 @@
  * The session-source seam.
  *
  * `AuthProvider` never talks to an auth endpoint directly and never knows whether it is real or
- * simulated. It talks to a `SessionSource`. Swapping the temporary dev persona for the real
- * backend login flow is therefore a one-object change in `resolveSessionSource()` — no provider,
- * guard, route or component redesign.
+ * simulated. It talks to a `SessionSource`. Swapping the backend login flow for a development
+ * substitute is therefore a one-object change in `resolveSessionSource()` — no provider, guard,
+ * route or component redesign.
  *
- * The backend source below deliberately issues NO network request. OPENAPI.yaml publishes no
- * token endpoint (see `@/lib/auth/authContract`), so calling `POST /api/auth/login` would be
- * inventing a protocol and would produce a 404 that looks like a backend fault rather than a
- * missing contract. It fails fast with a stable, self-explanatory code instead.
+ * `backendContractSessionSource` below is the real one: it calls the auth endpoints that
+ * `docs/OPENAPI.yaml` publishes and that were verified against the running backend.
  */
-import { ApiError } from '@/lib/api/errors'
-import { AUTH_CONTRACT_GAP_SUMMARY, AUTH_CONTRACT_NOT_PUBLISHED_CODE } from './authContract'
+import * as authApi from '@/lib/api/auth'
 import type { SessionSourceId, Session, User } from './types'
 
 export interface ResolvedSession {
@@ -33,29 +30,23 @@ export interface SessionSource {
   revoke(): Promise<void>
 }
 
-function notPublished(): ApiError {
-  return new ApiError({
-    kind: 'not_implemented',
-    code: AUTH_CONTRACT_NOT_PUBLISHED_CODE,
-    message: AUTH_CONTRACT_GAP_SUMMARY,
-  })
-}
-
 /**
- * The real backend source. It is a correct, complete implementation of the interface whose
- * authenticate/revoke methods report that the contract has not published those operations.
+ * The real backend source.
  *
- * Methods return promises directly rather than being declared `async`: there is nothing to await,
- * because there is nothing to call.
+ * `restore()` resolves to null rather than attempting anything: the bearer token lives in module
+ * memory only and is deliberately never written to localStorage, sessionStorage or a cookie, so a
+ * fresh document genuinely has no credential to resume. That is a privacy and XSS-surface choice,
+ * not an oversight, and it is why a page reload signs the operator out. The contract publishes no
+ * refresh endpoint that could re-establish a session either (see
+ * `MISSING_AUTH_CONTRACT_ELEMENTS`), so there is nothing honest to restore.
  */
 export const backendContractSessionSource: SessionSource = {
   id: 'backend-contract',
   label: 'Backend bearer session',
   isDevelopmentOnly: false,
-  // Sessions are in-memory only, so a fresh document can never have anything to resume.
   restore: () => Promise.resolve(null),
-  authenticate: () => Promise.reject(notPublished()),
-  revoke: () => Promise.reject(notPublished()),
+  authenticate: (credentials) => authApi.login(credentials),
+  revoke: () => authApi.logout(),
 }
 
 /**

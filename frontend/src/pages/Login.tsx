@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate, useLocation } from 'react-router'
-import { Lock, ShieldAlert, AlertTriangle, CircleSlash, FlaskConical } from 'lucide-react'
+import { Lock, ShieldAlert, AlertTriangle, FlaskConical, KeyRound } from 'lucide-react'
 import { useAuth } from '@/lib/auth/context'
 import {
   isDevAuthEnabled,
@@ -8,11 +8,7 @@ import {
   DEV_SESSION_BANNER,
   type DevPersona,
 } from '@/lib/auth/devAuth'
-import {
-  MISSING_AUTH_CONTRACT_ELEMENTS,
-  AUTH_TOKEN_ISSUANCE_PUBLISHED,
-  DECLARED_SECURITY_SCHEME,
-} from '@/lib/auth/authContract'
+import { DECLARED_SECURITY_SCHEME, SESSION_TTL_HOURS } from '@/lib/auth/authContract'
 import { ROLE_METADATA } from '@/lib/auth/types'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -30,11 +26,9 @@ function Mark({ className }: { className?: string }) {
 /**
  * Sign-in screen.
  *
- * This screen does not pretend to authenticate anyone. Credential transport (bearer) is wired and
- * tested, but OPENAPI.yaml publishes no endpoint that issues a token, so submitting real
- * credentials reports the contract gap instead of showing a success state that never happened.
- * The form is rendered disabled with the reason attached - hiding it would leave an operator
- * guessing, and enabling it would promise a capability that does not exist.
+ * Submits real credentials to `POST /api/auth/login` and holds the returned opaque bearer token in
+ * memory only. A rejected credential is reported as the backend's refusal, never softened into a
+ * signed-in state.
  */
 export function Login() {
   const [username, setUsername] = useState('')
@@ -42,14 +36,12 @@ export function Login() {
   const [loading, setLoading] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
 
-  const { login, signInWithDevPersona, authState, error: authError } = useAuth()
+  const { login, signInWithDevPersona, error: authError } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/'
   const devEnabled = isDevAuthEnabled()
-  const canSubmitCredentials = AUTH_TOKEN_ISSUANCE_PUBLISHED
-  const showGap = authState === 'UNAVAILABLE' && !canSubmitCredentials
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -94,26 +86,24 @@ export function Login() {
           </div>
         </div>
 
-        {showGap && <AuthContractGap />}
-
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-3">
             <Input
               label="Operator Username / ID"
-              placeholder={canSubmitCredentials ? 'e.g. s.connor' : 'Unavailable - no token endpoint'}
+              placeholder="e.g. s.connor"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              disabled={!canSubmitCredentials}
+              autoComplete="username"
               className="font-mono text-xs"
               required
             />
             <Input
               label="Passphrase"
               type="password"
-              placeholder={canSubmitCredentials ? 'Enter passphrase' : 'Unavailable - no token endpoint'}
+              placeholder="Enter passphrase"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              disabled={!canSubmitCredentials}
+              autoComplete="current-password"
               className="font-mono text-xs"
               required
             />
@@ -134,13 +124,14 @@ export function Login() {
             variant="primary"
             size="md"
             loading={loading}
-            disabled={!canSubmitCredentials}
             className="w-full justify-center"
             leadingIcon={<Lock className="h-3.5 w-3.5" />}
           >
-            {canSubmitCredentials ? 'Authenticate Session' : 'Authentication Unavailable'}
+            Authenticate Session
           </Button>
         </form>
+
+        <SessionPosture />
 
         {devEnabled && (
           <div className="space-y-2.5 border-t border-line pt-4">
@@ -206,40 +197,41 @@ export function Login() {
   )
 }
 
-/** States the missing contract elements as a fact, rather than as a login failure. */
-function AuthContractGap() {
+/**
+ * How long a session lasts and why it does not survive a reload.
+ *
+ * Stated up front because it surprises operators otherwise: the credential is memory-only by
+ * design, and the contract publishes no refresh endpoint, so there is no "keep me signed in" option
+ * to offer. Showing this beats letting a reload look like a logout bug.
+ */
+function SessionPosture() {
   return (
-    <div
-      role="status"
-      className="space-y-2 rounded-md border border-warning/40 bg-warning-soft p-3"
-      data-testid="auth-contract-gap"
-    >
-      <div className="flex items-center gap-1.5 text-warning">
-        <CircleSlash className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        <span className="text-[0.6875rem] font-bold uppercase tracking-wider">
-          Contract gap: no token endpoint
+    <div className="space-y-1.5 rounded-md border border-line bg-inset/60 p-3">
+      <div className="flex items-center gap-1.5 text-mute">
+        <KeyRound className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span className="text-[0.625rem] font-bold uppercase tracking-wider">
+          Session posture
         </span>
       </div>
-      <p className="text-[0.6875rem] leading-relaxed text-fg">
-        The OpenAPI contract declares <span className="font-mono">bearerAuth</span> (
-        {DECLARED_SECURITY_SCHEME.bearerFormat}) but publishes no endpoint that issues, renews or
-        revokes a token. Credential transport is implemented; credential issuance is not available.
-      </p>
-      <ul className="space-y-0.5">
-        {MISSING_AUTH_CONTRACT_ELEMENTS.map((element) => (
-          <li
-            key={element.capability}
-            className="font-mono text-[0.625rem] leading-relaxed text-dim"
-          >
-            MISSING: {element.capability}
-          </li>
-        ))}
+      <ul className="space-y-1 font-mono text-[0.625rem] leading-relaxed text-dim">
+        <li>
+          Credential: {DECLARED_SECURITY_SCHEME.bearerFormat} bearer token, never a JWT. It is
+          never parsed and never read for claims.
+        </li>
+        <li>
+          Storage: memory only. Nothing is written to localStorage, sessionStorage or a cookie, so
+          reloading this tab signs you out.
+        </li>
+        <li>
+          Lifetime: {SESSION_TTL_HOURS}h server-side. No refresh endpoint is published, so
+          re-authenticating is the only renewal.
+        </li>
+        <li className="flex items-start gap-1.5 text-mute">
+          <ShieldAlert className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+          Logging out revokes the session at the backend. Other tabs or devices holding separate
+          tokens are unaffected, as no revoke-all-sessions endpoint exists.
+        </li>
       </ul>
-      <p className="flex items-start gap-1.5 text-[0.625rem] leading-relaxed text-mute">
-        <ShieldAlert className="mt-0.5 h-3 w-3 shrink-0" />
-        Development personas are the only way into the console in a development build, and are
-        compiled out of production builds.
-      </p>
     </div>
   )
 }
