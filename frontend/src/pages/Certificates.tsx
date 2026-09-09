@@ -1,278 +1,199 @@
-import { useState } from 'react'
-import { FileCheck2, ShieldCheck, ShieldAlert, Zap } from 'lucide-react'
+﻿import { useState, type FormEvent } from 'react'
+import { FileCheck2, Search } from 'lucide-react'
 import { PageHeader } from '@/components/shell/PageHeader'
 import { Button } from '@/components/ui/Button'
-import { Badge } from '@/components/ui/Badge'
-import { StatusBadge } from '@/components/status/StatusBadge'
-import { EvidenceId, EvidenceHash } from '@/components/evidence/EvidenceId'
-import { useVerifyCertificateMutation } from '@/lib/api'
-import { isAvailable } from '@/lib/api/capabilities'
-import { cn } from '@/lib/cn'
+import { Input } from '@/components/ui/Input'
+import { Panel, PanelHeader } from '@/components/ui/Panel'
+import { EvidenceHash } from '@/components/evidence/EvidenceId'
+import { CertificateVerificationPanel } from '@/components/certificate/CertificateVerificationPanel'
+import { EmptyState, ErrorState, LoadingState } from '@/components/states'
+import {
+  useCertificateQuery,
+  useVerifyCertificateMutation,
+  type CertificateVerificationOut,
+} from '@/lib/api'
+import { unavailableReason } from '@/lib/api/capabilities'
 
+/**
+ * Certificate lookup and verification.
+ *
+ * Everything shown here is a backend response. The screen starts with no certificate and no
+ * verification result, and it never fills either in itself:
+ *
+ *   - there is no seeded `valid: true` on load, because nothing has been verified yet;
+ *   - there is no "simulate tamper" control, because a frontend toggle cannot alter evidence and
+ *     showing one would teach operators that verification results are a UI setting;
+ *   - there are no compliance badges, because compliance is an assertion about a process, not a
+ *     field the API returns.
+ *
+ * The contract publishes no certificate collection route, so an operator arrives with an ID â€” from
+ * an operation's evidence trail â€” rather than browsing a list. That limitation is stated on screen.
+ */
 export function Certificates() {
-  const [certId] = useState('cert-8841-a9f-2026')
-  const [isSimulatedTamper, setIsSimulatedTamper] = useState(false)
-  const [verificationResult, setVerificationResult] = useState<{
-    valid: boolean
-    signature_valid: boolean
-    evidence_integrity: boolean
-    reason?: string
-  } | null>({
-    valid: true,
-    signature_valid: true,
-    evidence_integrity: true,
-    reason: 'Ed25519 signature and Merkle payload integrity verified against root authority key.',
-  })
+  const [enteredId, setEnteredId] = useState('')
+  const [lookupId, setLookupId] = useState<string | null>(null)
+  const [verification, setVerification] = useState<CertificateVerificationOut | null>(null)
 
-  const verifyMutation = useVerifyCertificateMutation(certId)
-  const isVerifyAvailable = isAvailable('certificates.verify')
+  const certificateQuery = useCertificateQuery(lookupId ?? undefined)
+  const verifyMutation = useVerifyCertificateMutation(lookupId ?? '')
+
+  const handleLookup = (e: FormEvent) => {
+    e.preventDefault()
+    const trimmed = enteredId.trim()
+    if (!trimmed) return
+    setVerification(null)
+    setLookupId(trimmed)
+  }
 
   const handleVerify = () => {
-    if (isSimulatedTamper) {
-      setVerificationResult({
-        valid: false,
-        signature_valid: false,
-        evidence_integrity: false,
-        reason:
-          'CRITICAL: SHA-256 payload digest mismatch. The signed hash does not match computed bundle hash.',
-      })
-      return
-    }
-
-    if (isVerifyAvailable) {
-      verifyMutation.mutate(undefined, {
-        onSuccess: (res) => {
-          setVerificationResult({
-            valid: Boolean(res.valid),
-            signature_valid: Boolean(res.signature_valid),
-            evidence_integrity: Boolean(res.evidence_integrity),
-            reason: res.reason,
-          })
-        },
-      })
-    } else {
-      setVerificationResult({
-        valid: true,
-        signature_valid: true,
-        evidence_integrity: true,
-        reason: 'Signature verified against local root key authority.',
-      })
-    }
+    if (!lookupId) return
+    verifyMutation.mutate(undefined, { onSuccess: (result) => setVerification(result) })
   }
 
-  const toggleTamper = () => {
-    const next = !isSimulatedTamper
-    setIsSimulatedTamper(next)
-    if (next) {
-      setVerificationResult({
-        valid: false,
-        signature_valid: false,
-        evidence_integrity: false,
-        reason: 'TAMPER DETECTED: Simulated alteration of target raw cluster payload.',
-      })
-    } else {
-      setVerificationResult({
-        valid: true,
-        signature_valid: true,
-        evidence_integrity: true,
-        reason: 'Ed25519 signature and Merkle root integrity verified.',
-      })
-    }
-  }
-
-  const isValid = verificationResult?.valid ?? true
+  const listGap = unavailableReason('certificates.list')
+  const cert = certificateQuery.data
 
   return (
     <div className="flex flex-col min-h-full">
       <PageHeader
-        title="Cryptographic Erasure Certificates"
+        title="Certificates"
         icon={<FileCheck2 className="h-4 w-4 text-accent" />}
-        description="Tamper-evident cryptographic proof documents signed with Ed25519 root authority."
-        actions={
-          <div className="flex items-center gap-2">
-            <Button
-              variant={isSimulatedTamper ? 'danger' : 'outline'}
-              size="sm"
-              leadingIcon={<Zap className="h-3.5 w-3.5" />}
-              onClick={toggleTamper}
-            >
-              {isSimulatedTamper ? 'Revert Tamper Test' : 'Simulate Payload Tamper'}
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              loading={verifyMutation.isPending}
-              leadingIcon={<ShieldCheck className="h-3.5 w-3.5" />}
-              onClick={handleVerify}
-            >
-              Verify Certificate
-            </Button>
-          </div>
-        }
+        description="Retrieve an issued erasure certificate and run the backend's cryptographic verification."
       />
 
-      <div className="flex-1 p-6 space-y-6 max-w-4xl mx-auto w-full">
-        {/* Simulation Notice Banner */}
-        <div className="rounded-md border border-accent/40 bg-accent-soft p-4 flex items-start justify-between gap-3 text-xs">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 font-bold text-accent">
-              <Badge variant="accent">SIMULATION TESTBENCH</Badge>
-              <span>Cryptographic Proof Specification & Verification Demo</span>
-            </div>
-            <p className="text-fg opacity-90 leading-relaxed text-[0.6875rem]">
-              Live certificate generation and root CA signing require Milestone A backend delivery.
-              This interactive view demonstrates the canonical Ed25519 signature verification model
-              and payload tamper detection.
-            </p>
+      <div className="space-y-4 p-4 sm:p-5">
+        <form
+          onSubmit={handleLookup}
+          className="flex flex-col gap-3 rounded-md border border-line bg-surface p-4 sm:flex-row sm:items-end"
+        >
+          <div className="min-w-0 flex-1">
+            <Input
+              label="Certificate ID"
+              placeholder="e.g. cert_1a2b3c4d5e6f"
+              value={enteredId}
+              onChange={(e) => setEnteredId(e.target.value)}
+              mono
+              className="font-mono text-xs"
+              hint={listGap ?? undefined}
+            />
           </div>
-          <div className="shrink-0 font-mono text-[0.6875rem] text-dim">SPEC ISO/IEC 27040</div>
-        </div>
+          <Button
+            type="submit"
+            variant="primary"
+            size="md"
+            disabled={!enteredId.trim()}
+            leadingIcon={<Search className="h-3.5 w-3.5" />}
+          >
+            Retrieve
+          </Button>
+        </form>
 
-        {/* Tamper Warning Banner */}
-        {isSimulatedTamper && (
-          <div className="rounded-md border border-danger/60 bg-danger-soft p-4 space-y-2 text-danger motion-enter">
-            <div className="flex items-center gap-2 font-bold text-sm">
-              <ShieldAlert className="h-5 w-5" />
-              <span>CRITICAL: CRYPTOGRAPHIC INTEGRITY VIOLATION DETECTED</span>
-            </div>
-            <p className="text-xs text-fg leading-relaxed">
-              The evidence payload bytes have been altered post-signing. The Merkle root digest no
-              longer matches the Ed25519 root signature inside this certificate. The certificate is
-              immediately invalidated.
-            </p>
-          </div>
+        {!lookupId && (
+          <EmptyState
+            title="No certificate selected"
+            description="Enter a certificate ID issued by a completed operation. Verification results are produced by the backend, never by this console."
+          />
         )}
 
-        {/* Certificate Document Canvas */}
-        <div
-          className={cn(
-            'rounded-lg border bg-surface p-8 space-y-6 shadow-2xl relative transition-all duration-300',
-            isValid ? 'border-line-strong' : 'border-danger/80 ring-2 ring-danger/40',
-          )}
-        >
-          {/* Top Header of Document */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-line pb-6">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-xs uppercase tracking-widest text-accent font-bold">
-                  OBLIVION FORENSIC ATTESTATION
-                </span>
-                <span className="text-dim text-[0.6875rem]">/ ISO 27040 COMPLIANT</span>
-              </div>
-              <h2 className="text-lg font-bold text-fg tracking-tight">
-                Certificate of Permanent Erasure & Destruction
-              </h2>
-            </div>
+        {lookupId && certificateQuery.isPending && <LoadingState title="Fetching certificate" />}
 
-            <div className="flex items-center gap-2">
-              <StatusBadge
-                kind="verification"
-                value={isValid ? 'VALID' : 'INVALID'}
-                emphasis="strong"
+        {lookupId && certificateQuery.isError && (
+          <ErrorState
+            error={certificateQuery.error}
+            title="Certificate could not be retrieved"
+          />
+        )}
+
+        {lookupId && cert && (
+          <>
+            <Panel>
+              <PanelHeader title="Issued certificate" />
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+                <Field label="Certificate ID" value={cert.id} mono />
+                <Field label="Operation ID" value={cert.operation_id} mono />
+                <Field label="Signing algorithm" value={cert.signing_algorithm} mono />
+                <Field label="Key ID" value={cert.key_id ?? 'not recorded'} mono />
+                <Field label="Issued at" value={formatIssued(cert.issued_at)} mono />
+                <Field label="Claim" value={cert.claim ?? 'not recorded'} />
+              </dl>
+
+              <div className="mt-3 space-y-2">
+                <span className="block text-[0.625rem] font-bold uppercase tracking-wider text-dim">
+                  Evidence digest (SHA-256, as recorded by the backend)
+                </span>
+                <EvidenceHash value={cert.evidence_digest} label="Evidence digest" />
+              </div>
+
+              <div className="mt-3 space-y-2">
+                <span className="block text-[0.625rem] font-bold uppercase tracking-wider text-dim">
+                  Signature and public key (hex, as stored)
+                </span>
+                <EvidenceHash value={cert.signature} label="Signature" />
+                <EvidenceHash value={cert.public_key} label="Public key" />
+              </div>
+            </Panel>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                variant="primary"
                 size="md"
+                onClick={handleVerify}
+                loading={verifyMutation.isPending}
+              >
+                Verify at backend
+              </Button>
+              <span className="text-[0.6875rem] text-dim">
+                Runs POST /api/certificates/&#123;id&#125;/verify. The backend decides validity; this
+                console only renders its answer.
+              </span>
+            </div>
+
+            {verifyMutation.isError && (
+              <ErrorState
+                error={verifyMutation.error}
+                title="Verification request failed"
               />
-            </div>
-          </div>
+            )}
 
-          {/* Certificate Metadata Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-            <div className="space-y-1">
-              <span className="text-dim text-[0.6875rem] block uppercase">Certificate ID</span>
-              <EvidenceId value={certId} label="Certificate ID" size="md" />
-            </div>
-
-            <div className="space-y-1">
-              <span className="text-dim text-[0.6875rem] block uppercase">Source Operation ID</span>
-              <EvidenceId value="op-8841-a9f2" label="Operation ID" size="md" />
-            </div>
-
-            <div className="space-y-1">
-              <span className="text-dim text-[0.6875rem] block uppercase">Target Scope</span>
-              <span className="font-mono text-fg font-semibold block truncate">
-                C:\Oblivion\Targets\dataset_finance_2026.dat
-              </span>
-            </div>
-
-            <div className="space-y-1">
-              <span className="text-dim text-[0.6875rem] block uppercase">Execution Policy</span>
-              <span className="font-mono text-fg font-semibold">
-                NIST SP 800-88 Rev. 1 — Cryptographic Purge (1-Pass Sanitize)
-              </span>
-            </div>
-          </div>
-
-          {/* Hashes & Digests */}
-          <div className="space-y-3 pt-2">
-            <span className="text-xs font-bold text-fg uppercase tracking-wider block">
-              Cryptographic Signatures & Digests
-            </span>
-
-            <div className="space-y-2">
-              <div className="rounded-sm border border-line bg-inset p-3 space-y-1">
-                <span className="text-dim text-[0.6875rem] uppercase block font-medium">
-                  Pre-Erasure Baseline Digest (SHA-256)
-                </span>
-                <EvidenceHash
-                  value={
-                    isSimulatedTamper
-                      ? 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
-                      : '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
-                  }
-                  label="Baseline SHA-256"
-                />
-              </div>
-
-              <div className="rounded-sm border border-line bg-inset p-3 space-y-1">
-                <span className="text-dim text-[0.6875rem] uppercase block font-medium">
-                  Sequential Evidence Merkle Root Hash
-                </span>
-                <EvidenceHash
-                  value="9a8831f4b002c9182374e6d38e219ba48810cba72199b908712398401aa89104"
-                  label="Merkle Root Hash"
-                />
-              </div>
-
-              <div className="rounded-sm border border-line bg-inset p-3 space-y-1">
-                <span className="text-dim text-[0.6875rem] uppercase block font-medium">
-                  Ed25519 Root Authority Digital Signature
-                </span>
-                <EvidenceHash
-                  value="3b7189c201887a0ef938ba418290ab7718920bcde29188273901bca728910e9948019ab72819bcde9018726354891a2b"
-                  label="Ed25519 Signature"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Verification Reason Statement */}
-          {verificationResult?.reason && (
-            <div
-              className={cn(
-                'rounded-sm border p-3.5 text-xs leading-relaxed',
-                isValid
-                  ? 'border-success/30 bg-success-soft text-success'
-                  : 'border-danger/30 bg-danger-soft text-danger',
-              )}
-            >
-              <div className="flex items-center gap-2 font-bold mb-1">
-                {isValid ? (
-                  <ShieldCheck className="h-4 w-4" />
-                ) : (
-                  <ShieldAlert className="h-4 w-4" />
-                )}
-                <span>Forensic Verification Attestation</span>
-              </div>
-              <p className="text-[0.6875rem] text-fg opacity-90">{verificationResult.reason}</p>
-            </div>
-          )}
-
-          {/* Certificate Footer */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-line pt-4 text-[0.6875rem] text-mute font-mono">
-            <div>Attestation Authority: Oblivion Enterprise Root CA</div>
-            <div>Timestamp: 2026-09-07T18:44:00Z</div>
-          </div>
-        </div>
+            {verification ? (
+              <CertificateVerificationPanel verification={verification} />
+            ) : (
+              !verifyMutation.isPending && (
+                <div className="rounded-md border border-line bg-inset p-3 text-[0.6875rem] leading-relaxed text-dim">
+                  NOT VERIFIED â€” no verification has been run against this certificate in this
+                  session. An unverified certificate has no status; it is not provisionally valid.
+                </div>
+              )
+            )}
+          </>
+        )}
       </div>
     </div>
   )
 }
+
+/** Render the backend timestamp without inventing one when it is absent or unreadable. */
+function formatIssued(issuedAt: string): string {
+  const parsed = Date.parse(issuedAt)
+  if (Number.isNaN(parsed)) return issuedAt || 'not recorded'
+  return `${new Date(parsed).toISOString().replace('T', ' ').slice(0, 19)} UTC`
+}
+
+function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[0.625rem] font-bold uppercase tracking-wider text-dim">{label}</dt>
+      <dd
+        className={
+          mono
+            ? 'mt-0.5 font-mono text-xs break-all text-fg'
+            : 'mt-0.5 text-xs leading-relaxed text-fg'
+        }
+      >
+        {value}
+      </dd>
+    </div>
+  )
+}
+
+

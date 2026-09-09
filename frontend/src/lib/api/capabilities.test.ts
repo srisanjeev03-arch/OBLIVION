@@ -1,30 +1,133 @@
 import { describe, it, expect } from 'vitest'
-import { isAvailable, unavailableReason, buildPath, FORENSIC_CAPABILITIES } from './capabilities'
+import {
+  CAPABILITIES,
+  buildPath,
+  contractDrift,
+  getCapability,
+  isAvailable,
+  isInContract,
+  unavailableReason,
+  type CapabilityId,
+} from './capabilities'
+import { CONTRACT_OPERATIONS, isContractOperation } from './contract-paths'
 
-describe('Capability Gating', () => {
-  it('identifies available capabilities correctly', () => {
-    expect(isAvailable('targets.analyze')).toBe(true)
-    expect(unavailableReason('targets.analyze')).toBeNull()
+/**
+ * The registry's availability is derived from the generated contract, so these specs are mostly
+ * about the *relationship* rather than about individual flags: nothing in the registry may claim an
+ * operation the application does not route, and nothing the application routes may be suppressed.
+ */
+
+const ALL_IDS = Object.keys(CAPABILITIES) as CapabilityId[]
+
+describe('availability is derived, not asserted', () => {
+  it('agrees with the contract for every registered capability', () => {
+    for (const id of ALL_IDS) {
+      const c = CAPABILITIES[id]
+      expect(isAvailable(id)).toBe(isContractOperation(c.method, c.path))
+    }
   })
 
-  it('identifies unavailable/unimplemented capabilities correctly', () => {
-    expect(isAvailable('operations.create')).toBe(false)
-    expect(unavailableReason('operations.create')).toContain('Awaiting backend: Phase 2')
+  it('has no drift between registry intent and the running application', () => {
+    // A non-empty result means either a capability was added without the backend routing it, or the
+    // backend shipped an operation the registry still describes as a gap.
+    expect(contractDrift()).toEqual([])
   })
 
-  it('correctly substitutes path parameters in buildPath', () => {
-    const path = buildPath('targets.get', { target_id: 'tgt-123' })
-    expect(path).toBe('/api/targets/tgt-123')
+  it('marks the auth trio available, since the backend routes and serves it', () => {
+    for (const id of ['auth.login', 'auth.me', 'auth.logout'] as const) {
+      expect(isInContract(id)).toBe(true)
+      expect(unavailableReason(id)).toBeNull()
+    }
   })
 
-  it('throws when required path parameters are missing', () => {
-    expect(() => buildPath('targets.get', {})).toThrowError('Missing path parameter "target_id"')
+  it('marks certificate verification available', () => {
+    // Previously pinned to implemented: false, which made the console refuse a shipped capability.
+    expect(isAvailable('certificates.verify')).toBe(true)
+    expect(isAvailable('certificates.get')).toBe(true)
   })
 
-  it('provides honest forensic detector capabilities', () => {
-    const unallocated = FORENSIC_CAPABILITIES.find((c) => c.id === 'fs.unallocated_clusters')
-    expect(unallocated).toBeDefined()
-    expect(unallocated?.status).toBe('UNAVAILABLE')
-    expect(unallocated?.limitation).toContain('Not assessed')
+  it('treats /health as contracted and reachable without a credential', () => {
+    expect(isAvailable('health')).toBe(true)
+    expect(getCapability('health').path).toBe('/health')
+  })
+})
+
+describe('gaps are named, not hidden', () => {
+  const GAPPED: CapabilityId[] = [
+    'operations.list',
+    'targets.list',
+    'audit.events',
+    'assurance.get',
+    'certificates.list',
+    'residual.findings',
+  ]
+
+  it('every gap capability is unavailable AND carries an explanation', () => {
+    for (const id of GAPPED) {
+      expect(isAvailable(id)).toBe(false)
+      // The point of the registry: an unavailable capability must say what happens instead.
+      expect(unavailableReason(id)).toBeTruthy()
+      expect(CAPABILITIES[id].gapNote).toBeTruthy()
+    }
+  })
+
+  it('no capability without a gapNote is missing from the contract', () => {
+    const missing = ALL_IDS.filter((id) => CAPABILITIES[id].gapNote === undefined && !isInContract(id))
+    expect(missing).toEqual([])
+  })
+})
+
+describe('registry integrity', () => {
+  it('keys match the ids they hold', () => {
+    for (const id of ALL_IDS) {
+      expect(CAPABILITIES[id].id).toBe(id)
+    }
+  })
+
+  it('every path is absolute', () => {
+    for (const id of ALL_IDS) {
+      expect(CAPABILITIES[id].path.startsWith('/')).toBe(true)
+    }
+  })
+
+  it('registers no duplicate method+path among callable capabilities', () => {
+    const seen = new Map<string, CapabilityId>()
+    const duplicates: string[] = []
+    for (const id of ALL_IDS) {
+      if (CAPABILITIES[id].gapNote) continue
+      const key = `${CAPABILITIES[id].method} ${CAPABILITIES[id].path}`
+      if (seen.has(key)) duplicates.push(`${key} (${String(seen.get(key))} vs ${id})`)
+      seen.set(key, id)
+    }
+    expect(duplicates).toEqual([])
+  })
+
+  it('covers every operation the contract publishes', () => {
+    const registered = new Set(
+      ALL_IDS.filter((id) => !CAPABILITIES[id].gapNote).map(
+        (id) => `${CAPABILITIES[id].method} ${CAPABILITIES[id].path}`,
+      ),
+    )
+    const uncovered = CONTRACT_OPERATIONS.filter((op) => !registered.has(op))
+    expect(uncovered).toEqual([])
+  })
+
+  it('flags exactly the destructive operations for confirmation handling', () => {
+    const destructive = ALL_IDS.filter((id) => CAPABILITIES[id].destructive)
+    expect(destructive.sort()).toEqual(
+      ['operations.create', 'operations.execute', 'recovery.restore'].sort(),
+    )
+  })
+})
+
+describe('buildPath', () => {
+  it('substitutes and encodes parameters', () => {
+    expect(
+      buildPath('certificates.verify', { certificate_id: 'cert 1/2' }),
+    ).toBe('/api/certificates/cert%201%2F2/verify')
+  })
+
+  it('refuses to build a path with a missing parameter instead of sending a broken URL', () => {
+    expect(() => buildPath('operations.get', {})).toThrow(/Missing path parameter/)
   })
 })

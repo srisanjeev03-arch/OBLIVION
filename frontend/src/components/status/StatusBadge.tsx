@@ -72,7 +72,7 @@ const operationIcons: Record<OperationState, Icon> = {
 }
 
 const assuranceIcons: Record<AssuranceState, Icon> = {
-  VALIDATED: ShieldCheck,
+  PASSED: ShieldCheck,
   PARTIAL: ShieldAlert,
   INCONCLUSIVE: ShieldQuestion,
   FAILED: ShieldOff,

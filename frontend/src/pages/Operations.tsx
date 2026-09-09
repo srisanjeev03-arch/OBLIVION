@@ -220,7 +220,7 @@ export function Operations() {
               <div>
                 <span className="text-dim block">Policy:</span>
                 <span className="text-fg font-semibold">
-                  {inspectedOp?.policy_id || 'pol-nist-800-88-purge'}
+                  {inspectedOp?.policy_id ?? 'not recorded by the backend'}
                 </span>
               </div>
             </div>

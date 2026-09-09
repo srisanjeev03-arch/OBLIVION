@@ -1,208 +1,113 @@
-import { ShieldCheck, Info } from 'lucide-react'
+﻿import { ShieldQuestion, Scale, Info } from 'lucide-react'
 import { PageHeader } from '@/components/shell/PageHeader'
-import { Badge } from '@/components/ui/Badge'
-import { StatusBadge } from '@/components/status/StatusBadge'
-import { CapabilityBadge } from '@/components/status/CapabilityBadge'
-import { AIPanel } from '@/components/ai/AIPanel'
-import { useAIPreferences } from '@/stores/ai.store'
-import type { AssuranceState } from '@/lib/status'
+import { Panel, PanelHeader } from '@/components/ui/Panel'
+import { UnavailableState } from '@/components/states'
+import { getCapability, unavailableReason } from '@/lib/api/capabilities'
 
-export interface AssuranceVector {
-  id: string
-  title: string
-  description: string
-  status: AssuranceState
-  capabilityStatus: 'AVAILABLE' | 'LIMITED' | 'UNAVAILABLE'
-  standard: string
-  limitations?: string
-}
+/**
+ * Assurance.
+ *
+ * This screen used to present a hand-written "10-vector assurance framework" with standards
+ * citations â€” NIST SP 800-88 Rev. 1, DoD 5220.22-M, ISO/IEC 27040:2015 â€” and badges reading
+ * "ISO 27040 COMPLIANT" and "NIST SP 800-88". None of it came from the backend, none of it was
+ * evaluated, and the vector list described capabilities the product does not have (physical cluster
+ * readback, NAND out-of-band inspection). Compliance is an assertion about a process and an
+ * auditor's judgement; it is not a field an API returns, so a console cannot award it.
+ *
+ * What remains is the honest position: the backend runs an assurance engine, its result is embedded
+ * in signed evidence, and no assurance read endpoint is published. So assurance cannot be displayed
+ * here yet, and the two places where it *can* be read are named instead.
+ */
 
-const ASSURANCE_FRAMEWORK_VECTORS: AssuranceVector[] = [
+const READABLE_EVIDENCE = [
   {
-    id: 'vec-01',
-    title: '1. Target Identification & Cluster Geometry Mapping',
-    description:
-      'Volume mount point, physical geometry, LCN cluster runs, and sector alignment mapped.',
-    status: 'NOT_EVALUATED',
-    capabilityStatus: 'AVAILABLE',
-    standard: 'NTFS Filesystem Standard',
+    title: 'Per-operation evidence events',
+    path: 'GET /api/operations/{operation_id}/events',
+    detail:
+      'The tamper-evident event chain for one operation, including the states it passed through ' +
+      'and the digest recorded for each event.',
+    where: 'Operations â†’ open an operation by ID',
   },
   {
-    id: 'vec-02',
-    title: '2. Scope Boundary & Alternate Data Streams (ADS)',
-    description: 'Named data streams, reparse points, hardlinks, and shadow copy links identified.',
-    status: 'NOT_EVALUATED',
-    capabilityStatus: 'AVAILABLE',
-    standard: 'NTFS ADS Specification',
+    title: 'Certificate verification dimensions',
+    path: 'POST /api/certificates/{certificate_id}/verify',
+    detail:
+      'Ten dimension-level results (structure, evidence digest, signature validity, signer trust, ' +
+      'chain integrity, operation and target consistency) plus an overall status and an explicit ' +
+      'list of what the certificate cannot prove.',
+    where: 'Certificates â†’ retrieve and verify',
   },
-  {
-    id: 'vec-03',
-    title: '3. Pre-Erasure Cryptographic Baseline Capture',
-    description: 'Deterministic SHA-256 payload digest captured prior to destructive overwriting.',
-    status: 'NOT_EVALUATED',
-    capabilityStatus: 'AVAILABLE',
-    standard: 'FIPS 180-4 (SHA-256)',
-  },
-  {
-    id: 'vec-04',
-    title: '4. Block-Level Sanitization Execution',
-    description: 'Execution of NIST SP 800-88 Rev. 1 Cryptographic Purge or multi-pass overwrite.',
-    status: 'NOT_EVALUATED',
-    capabilityStatus: 'LIMITED',
-    standard: 'NIST SP 800-88 Rev. 1 / DoD 5220.22-M',
-    limitations: 'Requires elevated daemon execution on host OS.',
-  },
-  {
-    id: 'vec-05',
-    title: '5. Low-Level Post-Verification Readback',
-    description:
-      'Immediate readback of targeted physical clusters to verify byte inversion and zero vacancy.',
-    status: 'NOT_EVALUATED',
-    capabilityStatus: 'LIMITED',
-    standard: 'ISO/IEC 27040:2015',
-  },
-  {
-    id: 'vec-06',
-    title: '6. Negative Forensic Carving Test',
-    description:
-      'Forensic carvers and file-table parsers evaluate whether deleted headers remain discoverable.',
-    status: 'NOT_EVALUATED',
-    capabilityStatus: 'UNAVAILABLE',
-    standard: 'Digital Forensics Carving Standard',
-    limitations: 'Negative recovery detector awaiting backend Phase 8 integration.',
-  },
-  {
-    id: 'vec-07',
-    title: '7. Unallocated Space & Slack Remnant Analysis',
-    description: 'Deep scan of cluster slack bytes and adjacent unallocated sectors.',
-    status: 'NOT_EVALUATED',
-    capabilityStatus: 'UNAVAILABLE',
-    standard: 'Forensic Remnant Verification',
-    limitations: 'Not assessed — unallocated cluster detector unavailable in current V1 build.',
-  },
-  {
-    id: 'vec-08',
-    title: '8. SSD/NVMe Out-of-Band Remnant Evaluation',
-    description:
-      'Verification that flash wear-leveling did not retain stale copies in unmapped blocks.',
-    status: 'NOT_EVALUATED',
-    capabilityStatus: 'UNAVAILABLE',
-    standard: 'NAND Wear-Leveling Boundary',
-    limitations:
-      'Physical NAND silicon inspection is technically impossible via software without controller testbench.',
-  },
-  {
-    id: 'vec-09',
-    title: '9. Tamper-Evident Evidence Chain Integrity',
-    description: 'Cryptographic hash-chain of all lifecycle events sealed with zero sequence gaps.',
-    status: 'NOT_EVALUATED',
-    capabilityStatus: 'LIMITED',
-    standard: 'Merkle Audit Log Chain',
-    limitations: 'Evidence chain persists in memory; permanent ledger delivered in Phase 6.',
-  },
-  {
-    id: 'vec-10',
-    title: '10. Ed25519 Root Authority Attestation',
-    description: 'Digitally signed cryptographic certificate issued by root certificate authority.',
-    status: 'NOT_EVALUATED',
-    capabilityStatus: 'LIMITED',
-    standard: 'Ed25519 / RFC 8032',
-    limitations: 'Awaiting Milestone A certificate issuance backend.',
-  },
-]
+] as const
 
 export function Assurance() {
-  const aiEnabled = useAIPreferences((s) => s.enabled)
+  const capability = getCapability('assurance.get')
+  const reason = unavailableReason('assurance.get')
+
   return (
     <div className="flex flex-col min-h-full">
       <PageHeader
-        title="Multi-Vector Assurance Framework"
-        icon={<ShieldCheck className="h-4 w-4 text-success" />}
-        description="Evidence-based forensic verification scorecard. Distinguishes verified scope from physical irrecoverability."
+        title="Assurance"
+        icon={<ShieldQuestion className="h-4 w-4 text-accent" />}
+        description="How confident the backend's verification stages permit us to be that a target is unrecoverable within the supported scope."
       />
 
-      <div className="flex-1 p-6 space-y-6 max-w-5xl mx-auto w-full">
-        {/* AI Advisory — Assurance Explanation */}
-        {aiEnabled && (
-          <AIPanel
-            title="Assurance Explanation"
-            state="UNAVAILABLE"
-            summary="The AI advisory layer is not yet integrated for assurance explanation. The deterministic multi-vector framework below is the authoritative measure of operational confidence."
-            drawerSubtitle="AI ADVISORY — Assurance Explanation"
-          />
-        )}
-
-        {/* Core Forensic Truth Axiom Banner */}
-        <div className="rounded-md border border-info/40 bg-info-soft p-4 space-y-2 text-xs text-info">
-          <div className="flex items-center gap-2 font-bold text-fg">
-            <Info className="h-4 w-4 text-info shrink-0" />
-            <span>Forensic Axiom: NOT DETECTED ≠ PROVABLY UNRECOVERABLE</span>
-          </div>
-          <p className="text-[0.6875rem] text-dim leading-relaxed">
-            Oblivion adheres to strict forensic standards. The absence of detected file remnants in
-            a tested filesystem scope does not prove that unallocated NAND wear blocks or hardware
-            shadow sectors contain zero residual data. The console guarantees high assurance
-            strictly within validated boundaries.
-          </p>
-        </div>
-
-        {/* Aggregate Status Card */}
-        <div className="rounded-md border border-line bg-surface p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <span className="text-dim uppercase text-[0.6875rem] font-bold tracking-wider">
-              Assurance Evaluation State
-            </span>
-            <div className="flex items-center gap-2.5">
-              <StatusBadge kind="assurance" value="NOT_EVALUATED" emphasis="strong" size="md" />
-              <span className="text-xs text-dim">
-                Evaluation executes automatically upon operation completion.
-              </span>
+      <div className="mx-auto w-full max-w-4xl space-y-4 p-4 sm:p-5">
+        <div className="flex items-start gap-2.5 rounded-md border border-info/40 bg-info-soft p-4 text-xs">
+          <Scale className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden="true" />
+          <div className="space-y-1.5">
+            <div className="font-bold text-fg">
+              NOT DETECTED is not the same as PROVABLY UNRECOVERABLE
             </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Badge variant="neutral">ISO 27040 COMPLIANT</Badge>
-            <Badge variant="neutral">NIST SP 800-88</Badge>
+            <p className="leading-relaxed text-dim">
+              Oblivion reports assurance within a stated scope: a filesystem, a media class, a set of
+              supported recovery techniques. The absence of detected remnants in a tested scope does
+              not establish that unmapped NAND blocks, hardware shadow sectors or out-of-scope
+              snapshots contain nothing. Any screen in this console that shows a result is reporting
+              what a backend stage observed, and any stage that has not run says so.
+            </p>
           </div>
         </div>
 
-        {/* 10-Point Vector Framework List */}
-        <div className="rounded-md border border-line bg-surface overflow-hidden">
-          <div className="border-b border-line bg-elevated/60 px-5 py-3 flex items-center justify-between">
-            <h3 className="text-xs font-bold text-fg uppercase tracking-wider">
-              Multi-Vector Assurance Verification Criteria
-            </h3>
-            <span className="text-[0.6875rem] text-dim font-mono">10 VERIFICATION VECTORS</span>
-          </div>
+        <Panel>
+          <PanelHeader title="Assurance assessment" />
+          <UnavailableState
+            title="Assurance is not retrievable from the published contract"
+            reason={reason ?? undefined}
+            description={
+              <>
+                Backend operation: <span className="font-mono">{capability.method} {capability.path}</span>{' '}
+                â€” not routed. No assurance value is shown here, and none is estimated.
+              </>
+            }
+          />
+        </Panel>
 
-          <div className="divide-y divide-line">
-            {ASSURANCE_FRAMEWORK_VECTORS.map((vec) => (
-              <div key={vec.id} className="p-4 space-y-2 hover:bg-elevated/30 transition-colors">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-fg">{vec.title}</span>
-                  </div>
-                  <div className="flex items-center gap-2.5 shrink-0">
-                    <span className="font-mono text-[0.625rem] text-mute">{vec.standard}</span>
-                    <CapabilityBadge status={vec.capabilityStatus} />
-                  </div>
+        <Panel>
+          <PanelHeader title="Where verification results can be read today" />
+          <div className="space-y-3">
+            {READABLE_EVIDENCE.map((item) => (
+              <div key={item.path} className="rounded-sm border border-line bg-inset p-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="text-xs font-semibold text-fg">{item.title}</span>
+                  <span className="font-mono text-[0.625rem] text-mute">{item.path}</span>
                 </div>
-
-                <p className="text-[0.6875rem] text-dim leading-relaxed">{vec.description}</p>
-
-                {vec.limitations && (
-                  <div className="rounded-xs border border-line bg-inset p-2 text-[0.6875rem] text-dim space-y-0.5">
-                    <span className="font-semibold text-fg block text-[0.625rem] uppercase">
-                      Physical Boundary / Limitation:
-                    </span>
-                    <span className="opacity-90">{vec.limitations}</span>
-                  </div>
-                )}
+                <p className="mt-1 text-[0.6875rem] leading-relaxed text-dim">{item.detail}</p>
+                <p className="mt-1.5 font-mono text-[0.625rem] text-mute">{item.where}</p>
               </div>
             ))}
           </div>
+        </Panel>
+
+        <div className="flex items-start gap-2 rounded-md border border-line bg-surface p-3 text-[0.6875rem] leading-relaxed text-mute">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>
+            When the backend publishes an assurance read endpoint, this screen renders its result and
+            nothing else changes: the capability registry derives availability from the generated
+            contract, so the screen begins reporting real data the moment the route exists.
+          </span>
         </div>
       </div>
     </div>
   )
 }
+

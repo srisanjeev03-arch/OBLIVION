@@ -34,6 +34,11 @@ if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
 OUTPUT_PATH = REPO_ROOT / "docs" / "OPENAPI.yaml"
+# The frontend's capability registry derives "is this in the contract?" from this file instead of
+# hand-maintaining a boolean, which is how it drifted into claiming that shipped endpoints were
+# absent. One command refreshes both halves of the contract.
+FRONTEND_PATHS_MODULE = REPO_ROOT / "frontend" / "src" / "lib" / "api" / "contract-paths.ts"
+FRONTEND_POLICIES_MODULE = REPO_ROOT / "frontend" / "src" / "lib" / "api" / "contract-policies.ts"
 
 # Endpoints that must be reachable without a credential.  ``/api/auth/login``
 # is what mints the token, so it cannot require one.  ``/api/auth/logout``
@@ -174,6 +179,57 @@ def build_spec() -> dict[str, Any]:
     return spec
 
 
+def authoritative_policies() -> list[dict[str, object]]:
+    """The allowlisted erasure policies, straight from the backend registry."""
+    from oblivion.core.policy.engine import POLICY_REGISTRY
+
+    return [
+        {
+            "policy_id": p.policy_id,
+            "name": p.name,
+            "allowed_modes": sorted(p.allowed_modes),
+            "allowed_target_types": sorted(p.allowed_target_types),
+            "requires_approval": p.requires_approval,
+            "description": p.description,
+        }
+        for p in sorted(POLICY_REGISTRY.values(), key=lambda x: x.policy_id)
+    ]
+
+
+def render_policies_module() -> str:
+    """Emit the allowlisted policies so the workflow cannot offer a policy the backend rejects."""
+    import json
+
+    payload = json.dumps(authoritative_policies(), indent=2)
+    return (
+        "// GENERATED FILE - DO NOT EDIT.\n"
+        "// Written by scripts/gen_openapi.py from oblivion.core.policy.engine.POLICY_REGISTRY.\n"
+        "// Regenerate with: python scripts/gen_openapi.py\n"
+        "//\n"
+        "// The backend validates policy_id against this allowlist and rejects anything else, and it\n"
+        "// also enforces mode and target-type compatibility. Offering a policy the registry does not\n"
+        "// contain would produce a 400 that reads like an operator mistake.\n"
+        "\n"
+        "export interface AllowlistedPolicy {\n"
+        "  readonly policy_id: string\n"
+        "  readonly name: string\n"
+        "  readonly allowed_modes: readonly string[]\n"
+        "  readonly allowed_target_types: readonly string[]\n"
+        "  readonly requires_approval: boolean\n"
+        "  readonly description: string\n"
+        "}\n"
+        "\n"
+        "export const ALLOWLISTED_POLICIES: readonly AllowlistedPolicy[] = "
+        + payload
+        + " as const\n"
+        "\n"
+        "/** Policies whose allowed modes include `mode`. */\n"
+        "export function policiesForMode(mode: string): readonly AllowlistedPolicy[] {\n"
+        "  return ALLOWLISTED_POLICIES.filter((p) => p.allowed_modes.includes(mode))\n"
+        "}\n"
+    )
+
+
 def render(spec: dict[str, Any]) -> str:
     header = (
         "# GENERATED FILE - DO NOT EDIT.\n"
@@ -183,6 +239,39 @@ def render(spec: dict[str, Any]) -> str:
     )
     body = yaml.safe_dump(spec, sort_keys=False, allow_unicode=True, width=110)
     return header + body
+
+
+def render_contract_paths(spec: dict[str, Any]) -> str:
+    """Emit the contract's operations as a TypeScript module the frontend can assert against."""
+    entries: list[str] = []
+    for path, operations in spec.get("paths", {}).items():
+        for verb, operation in operations.items():
+            if not isinstance(operation, dict):
+                continue
+            entries.append(f'  \'{verb.upper()} {path}\',')
+    entries.sort()
+    return (
+        "// GENERATED FILE - DO NOT EDIT.\n"
+        "// Written by scripts/gen_openapi.py from docs/OPENAPI.yaml, which is itself generated\n"
+        "// from the FastAPI application. Regenerate with: python scripts/gen_openapi.py\n"
+        "//\n"
+        "// Every operation the backend actually serves. The frontend capability registry consults\n"
+        "// this instead of hand-maintaining an `inContract` boolean, so a capability can never\n"
+        "// claim to be contracted when the application does not route it - or be marked absent\n"
+        "// while the application already serves it.\n"
+        "\n"
+        "/** Format: `\"<VERB> <path>\"`, with path parameters left as `{name}`. */\n"
+        "export const CONTRACT_OPERATIONS: readonly string[] = [\n"
+        + "\n".join(entries)
+        + "\n] as const\n"
+        "\n"
+        "const LOOKUP: ReadonlySet<string> = new Set(CONTRACT_OPERATIONS)\n"
+        "\n"
+        "/** True when the contract publishes this exact verb+path operation. */\n"
+        "export function isContractOperation(method: string, path: string): boolean {\n"
+        "  return LOOKUP.has(`${method.toUpperCase()} ${path}`)\n"
+        "}\n"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -196,22 +285,41 @@ def main(argv: list[str] | None = None) -> int:
 
     spec = build_spec()
     rendered = render(spec)
+    paths_module = render_contract_paths(spec)
+    policies_module = render_policies_module()
+
+    def current_text(path: Path) -> str:
+        return path.read_text(encoding="utf-8") if path.exists() else ""
 
     if args.check:
-        current = OUTPUT_PATH.read_text(encoding="utf-8") if OUTPUT_PATH.exists() else ""
-        if current != rendered:
+        if (
+            current_text(OUTPUT_PATH) != rendered
+            or current_text(FRONTEND_PATHS_MODULE) != paths_module
+            or current_text(FRONTEND_POLICIES_MODULE) != policies_module
+        ):
             print(
-                "STALE: docs/OPENAPI.yaml does not match the application.\n"
-                "       run: python scripts/gen_openapi.py",
+                "STALE: docs/OPENAPI.yaml or a generated frontend module does not match the "
+                "application.\n       run: python scripts/gen_openapi.py",
                 file=sys.stderr,
             )
             return 1
-        print(f"OK: docs/OPENAPI.yaml matches the running application "
-              f"({len(spec['paths'])} paths)")
+        print(
+            f"OK: docs/OPENAPI.yaml matches the running application "
+            f"({len(spec['paths'])} paths)"
+        )
         return 0
 
     OUTPUT_PATH.write_text(rendered, encoding="utf-8", newline="\n")
-    print(f"wrote {OUTPUT_PATH} ({len(spec['paths'])} paths)")
+    for destination, content in (
+        (FRONTEND_PATHS_MODULE, paths_module),
+        (FRONTEND_POLICIES_MODULE, policies_module),
+    ):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(content, encoding="utf-8", newline="\n")
+    print(
+        f"wrote {OUTPUT_PATH} ({len(spec['paths'])} paths), "
+        f"{FRONTEND_PATHS_MODULE.name}, {FRONTEND_POLICIES_MODULE.name}"
+    )
     return 0
 
 

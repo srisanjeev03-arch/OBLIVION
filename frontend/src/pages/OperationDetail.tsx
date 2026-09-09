@@ -191,7 +191,7 @@ export function OperationDetail() {
                       Policy Standard
                     </span>
                     <span className="font-mono text-dim">
-                      {op.policy_id || 'pol-nist-800-88-purge'}
+                      {op.policy_id ?? 'not recorded by the backend'}
                     </span>
                   </div>
                 </div>

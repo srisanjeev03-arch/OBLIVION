@@ -10,6 +10,34 @@ import {
   type CapabilityId,
 } from './capabilities'
 import type { EvidenceEvent, Operation, RecoveryObject, TargetProfile } from './types'
+import type { components } from './schema'
+
+/**
+ * Certificate types come straight from the generated contract rather than being restated here.
+ * §14's dimension vocabulary is only trustworthy if it is the backend's own enum, and the generated
+ * `DimensionResultOut` carries exactly that: the ten dimensions and PASS/FAIL/NOT_CHECKED/
+ * INCONCLUSIVE, extracted from `oblivion.certificate.verification`.
+ */
+export type CertificateOut = components['schemas']['CertificateOut']
+export type CertificateVerificationOut = components['schemas']['CertificateVerificationOut']
+export type DimensionResultOut = components['schemas']['DimensionResultOut']
+export type VerificationDimension = DimensionResultOut['dimension']
+export type DimensionResult = DimensionResultOut['result']
+export type OverallStatus = CertificateVerificationOut['overall_status']
+
+/** The ten verification dimensions, in the order the backend enumerates them. */
+export const VERIFICATION_DIMENSIONS: readonly VerificationDimension[] = [
+  'STRUCTURE',
+  'VERSION_COMPATIBILITY',
+  'EVIDENCE_AVAILABILITY',
+  'EVIDENCE_DIGEST',
+  'SIGNATURE_VALIDITY',
+  'PUBLIC_KEY_CONSISTENCY',
+  'SIGNER_TRUST',
+  'EVIDENCE_CHAIN_INTEGRITY',
+  'OPERATION_CONSISTENCY',
+  'TARGET_CONSISTENCY',
+] as const
 
 /** Query-key factory. Keep every key here so invalidation stays predictable. */
 export const queryKeys = {
@@ -19,6 +47,8 @@ export const queryKeys = {
   operationEvents: (id: string) => ['oblivion', 'operation', id, 'events'] as const,
   recoveryObjects: () => ['oblivion', 'recovery-objects'] as const,
   certificate: (id: string) => ['oblivion', 'certificate', id] as const,
+  certificateVerification: (id: string) =>
+    ['oblivion', 'certificate', id, 'verification'] as const,
 }
 
 /**
@@ -76,6 +106,24 @@ export function useRecoveryObjectsQuery() {
     queryKey: queryKeys.recoveryObjects(),
     queryFn: gatedFetcher<RecoveryObject[]>('recovery.list', buildPath('recovery.list')),
     enabled: isAvailable('recovery.list'),
+  })
+}
+
+/**
+ * Fetch an issued certificate by ID.
+ *
+ * The contract publishes no certificate collection route, so there is no list to browse: an
+ * operator arrives with an ID from an operation's evidence trail. That is a real limitation and is
+ * stated as one on the screen rather than papered over with a table of invented certificates.
+ */
+export function useCertificateQuery(certificateId: string | undefined) {
+  return useQuery<CertificateOut, ApiError>({
+    queryKey: queryKeys.certificate(certificateId ?? ''),
+    queryFn: gatedFetcher<CertificateOut>(
+      'certificates.get',
+      buildPath('certificates.get', { certificate_id: certificateId ?? '' }),
+    ),
+    enabled: !!certificateId && isAvailable('certificates.get'),
   })
 }
 

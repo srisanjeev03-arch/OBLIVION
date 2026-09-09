@@ -1,0 +1,16 @@
+# Normalise line endings in the index so diffs stay stable across editors and
+# the Python/TypeScript halves of this repo, which historically disagreed.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.docx binary
+*.pdf binary
+*.db binary
+
+# Never let an autoformat churn a generated contract or generated types.
+docs/OPENAPI.yaml text eol=lf
+frontend/src/lib/api/schema.d.ts text eol=lf

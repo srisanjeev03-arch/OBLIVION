@@ -22,46 +22,39 @@ import { useUIStore } from '@/stores/ui.store'
 import { useAIPreferences } from '@/stores/ai.store'
 import { formatBytes, formatCount } from '@/lib/format'
 import type { OperationMode } from '@/lib/api/types'
+import { ALLOWLISTED_POLICIES } from '@/lib/api/contract-policies'
 import { isAvailable } from '@/lib/api/capabilities'
 import { AIPanel } from '@/components/ai/AIPanel'
 import { cn } from '@/lib/cn'
 
+/**
+ * The lifecycle rail mirrors the backend's real approval-gated state machine, not a marketing
+ * sequence. `operations.create` leaves an operation in PENDING_APPROVAL; a *different* principal
+ * must approve it (separation of duties) before `operations.execute` performs the erasure.
+ */
 const WORKFLOW_STEPS = [
-  '1. Discover',
-  '2. Analyze',
-  '3. Recommend',
-  '4. Configure',
-  '5. Review',
-  '6. Authorize',
-  '7. Erase',
-  '8. Verify',
-  '9. Remnants',
-  '10. Prove',
+  '1. Analyze target',
+  '2. Configure mode & policy',
+  '3. Request operation',
+  '4. Pending approval',
+  '5. Approved (separate principal)',
+  '6. Execute erasure',
+  '7. Verify',
+  '8. Recovery test',
+  '9. Residual scan',
+  '10. Certify',
 ]
 
-const POLICIES = [
-  {
-    id: 'pol-nist-800-88-purge',
-    name: 'NIST SP 800-88 Rev. 1 — Cryptographic Purge',
-    passes: '1-pass cryptographic key destruction + NVMe sanitize block zeroing',
-    standard: 'NIST SP 800-88 / ISO 27040',
-    suitableFor: 'SSD, NVMe, BitLocker encrypted volumes',
-  },
-  {
-    id: 'pol-dod-5220-22-m',
-    name: 'DoD 5220.22-M (E) — 3-Pass Overwrite',
-    passes: 'Pass 1: Fixed binary / Pass 2: Complement / Pass 3: Random + Verify',
-    standard: 'DoD 5220.22-M Standard',
-    suitableFor: 'Legacy Magnetic HDDs, Raw cluster sectors',
-  },
-  {
-    id: 'pol-bld-zero-verify',
-    name: 'BSI-GS / Single-Pass Pseudorandom + Negative Verify',
-    passes: '1-pass CSPRNG overwrite with post-verification readback check',
-    standard: 'BSI Guidelines',
-    suitableFor: 'Rapid selective file & directory unlinks',
-  },
-]
+/**
+ * Policies come from `contract-policies.ts`, which is generated from the backend's
+ * `POLICY_REGISTRY`. They are not editable here on purpose: the backend allowlist-checks
+ * `policy_id` and rejects anything else, so an invented identifier would only produce a 400 that
+ * reads like operator error. Each mode maps to exactly one policy, so the mode selection determines
+ * the policy rather than offering a free choice.
+ */
+function policyForMode(mode: OperationMode) {
+  return ALLOWLISTED_POLICIES.find((p) => p.allowed_modes.includes(mode))
+}
 
 export function ErasureWorkflow() {
   const navigate = useNavigate()
@@ -75,8 +68,12 @@ export function ErasureWorkflow() {
   // Workflow state
   const [currentStep] = useState<number>(4) // Start at Configure step
   const [selectedMode, setSelectedMode] = useState<OperationMode>('COMPLETE_ERASURE')
-  const [selectedPolicyId, setSelectedPolicyId] = useState<string>('pol-nist-800-88-purge')
   const [retentionDays, setRetentionDays] = useState<number>(30)
+
+  // The policy is determined by the mode, because that is how the backend allowlist is built: each
+  // mode has exactly one compatible policy. Holding it in state would let the UI present a
+  // combination the server is guaranteed to reject.
+  const selectedPolicy = policyForMode(selectedMode)
 
   // Confirmation modal state
   const [confirmModalOpen, setConfirmModalOpen] = useState(false)
@@ -85,13 +82,13 @@ export function ErasureWorkflow() {
   const isCreateAvailable = isAvailable('operations.create')
 
   const handleExecuteOperation = () => {
-    if (!acknowledgedRisk || !target?.id) return
+    if (!acknowledgedRisk || !target?.id || !selectedPolicy) return
 
     createMutation.mutate(
       {
         target_id: target.id,
         mode: selectedMode,
-        policy_id: selectedPolicyId,
+        policy_id: selectedPolicy.policy_id,
         confirmation: {
           acknowledged_risk: true,
         },
@@ -316,44 +313,54 @@ export function ErasureWorkflow() {
               )}
             </div>
 
-            {/* Step 4B: Erasure Policy Standard Selection */}
+            {/* Step 4B: Erasure Policy (backend-allowlisted, determined by mode) */}
             <div className="rounded-md border border-line bg-surface p-5 space-y-4">
               <div className="flex items-center justify-between border-b border-line pb-3">
                 <h3 className="text-xs font-bold text-fg uppercase tracking-wider">
-                  2. Select Erasure Policy Standard
+                  2. Erasure policy (allowlisted by the backend)
                 </h3>
                 <span className="text-[0.6875rem] text-dim font-mono">
                   CreateOperationRequest.policy_id
                 </span>
               </div>
 
-              <div className="space-y-2">
-                {POLICIES.map((policy) => {
-                  const isSelected = selectedPolicyId === policy.id
-                  return (
-                    <button
-                      key={policy.id}
-                      type="button"
-                      onClick={() => setSelectedPolicyId(policy.id)}
-                      className={cn(
-                        'w-full text-left rounded-md border p-3 cursor-pointer transition-colors space-y-1 block',
-                        isSelected
-                          ? 'border-accent bg-accent-soft/20 text-fg'
-                          : 'border-line bg-elevated/30 hover:bg-elevated text-dim',
-                      )}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-xs text-fg">{policy.name}</span>
-                        <Badge variant={isSelected ? 'accent' : 'neutral'}>{policy.standard}</Badge>
-                      </div>
-                      <p className="text-[0.6875rem] text-dim">{policy.passes}</p>
-                      <span className="text-[0.625rem] text-mute font-mono block">
-                        Target suitability: {policy.suitableFor}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
+              {selectedPolicy ? (
+                <div className="rounded-md border border-accent/40 bg-accent-soft/20 p-3 space-y-1.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-fg">{selectedPolicy.name}</span>
+                    <Badge variant="accent">{selectedPolicy.policy_id}</Badge>
+                  </div>
+                  <p className="text-[0.6875rem] leading-relaxed text-dim">
+                    {selectedPolicy.description}
+                  </p>
+                  <dl className="grid grid-cols-1 gap-x-6 gap-y-1 pt-1 font-mono text-[0.625rem] text-mute sm:grid-cols-2">
+                    <div>
+                      <dt className="inline">Applies to: </dt>
+                      <dd className="inline text-fg">
+                        {selectedPolicy.allowed_target_types.join(', ')}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="inline">Approval required: </dt>
+                      <dd className="inline text-fg">
+                        {selectedPolicy.requires_approval ? 'yes — separate principal' : 'no'}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              ) : (
+                <div className="rounded-md border border-warning/40 bg-warning-soft p-3 text-[0.6875rem] leading-relaxed text-warning">
+                  The backend registry contains no policy for mode{' '}
+                  <span className="font-mono">{selectedMode}</span>. The operation cannot be
+                  requested until one is allowlisted.
+                </div>
+              )}
+
+              <p className="text-[0.625rem] leading-relaxed text-mute">
+                This list is generated from the backend policy registry, so it cannot offer a
+                technique the server would refuse. The backend also enforces mode and target-type
+                compatibility; a mismatch is rejected before any filesystem action.
+              </p>
             </div>
 
             {/* AI Advisory — Sanitization Strategy Recommendation */}

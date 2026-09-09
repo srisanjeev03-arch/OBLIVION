@@ -1,101 +1,46 @@
 /**
- * Capability registry — the only place that decides whether the console may call a backend
- * endpoint. Two independent facts are recorded per capability:
+ * Capability registry — the single place that decides which backend operations the console may call.
  *
- *   inContract   the route exists in contract/OPENAPI.yaml
- *   implemented  the backend has shipped it (source: context/IMPLEMENTATION_PROGRESS.md,
- *                last updated 2026-09-05 — Phase 1 in progress, only target analysis planned)
+ * WHY `inContract` IS NOT A FIELD ANY MORE
+ * The previous revision hand-maintained two booleans per capability, `inContract` and `implemented`,
+ * and both rotted. `certificates.verify` was marked unimplemented although the backend had shipped
+ * and tested certificate verification for a long time; `health` was marked absent although the
+ * application routes `/health`; and the auth trio was missing entirely. A stale `implemented: false`
+ * is the more dangerous direction, because it makes the console refuse a capability the backend
+ * actually serves and then presents that refusal to the operator as a product limitation.
  *
- * A capability that is not implemented short-circuits to UNAVAILABLE *before* any network call.
- * Flip `implemented` here — and only here — as the backend ships phases.
+ * So the gate is now derived, not asserted: `isContractOperation()` reads the operation list that
+ * `scripts/gen_openapi.py` extracts from the FastAPI application itself. A capability therefore
+ * cannot claim to be contracted while unrouted, nor be suppressed while routed.
+ *
+ * What the backend answers at runtime remains the authority on whether a call *worked*. A 404 or a
+ * 500 is rendered as the real failure it is; it is never pre-empted by a frontend guess.
  */
+import { isContractOperation } from './contract-paths'
 
 export type CapabilityStatus =
   'AVAILABLE' | 'LIMITED' | 'UNAVAILABLE' | 'NOT_IMPLEMENTED' | 'INCONCLUSIVE'
 
-export interface ForensicCapability {
-  readonly id: string
-  readonly name: string
-  readonly status: CapabilityStatus
-  readonly explanation: string
-  readonly limitation?: string
-  readonly versionPhase?: string
-}
-
-export const FORENSIC_CAPABILITIES: readonly ForensicCapability[] = [
-  {
-    id: 'fs.ntfs_live_analysis',
-    name: 'NTFS Live Namespace & ADS Analysis',
-    status: 'AVAILABLE',
-    explanation: 'Live filesystem path inspection, Alternate Data Streams, and cluster geometry.',
-    versionPhase: 'Phase 1',
-  },
-  {
-    id: 'fs.baseline_sha256',
-    name: 'Pre-Erasure Baseline SHA-256 Capture',
-    status: 'AVAILABLE',
-    explanation: 'Captures raw payload digest prior to destructive operations.',
-    versionPhase: 'Phase 1',
-  },
-  {
-    id: 'erasure.controlled_execution',
-    name: 'Validated Deletion Operations',
-    status: 'LIMITED',
-    explanation: 'Destructive block-level zeroing and cryptographic key eradication.',
-    limitation:
-      'Requires running backend daemon with admin elevation; client execution is strictly blocked.',
-    versionPhase: 'Phase 2',
-  },
-  {
-    id: 'fs.ntfs_mft_carving',
-    name: 'NTFS Deleted $MFT Record Analysis',
-    status: 'UNAVAILABLE',
-    explanation:
-      'Low-level NTFS Master File Table deleted record parsing is not available in current V1 build.',
-    limitation: 'Not assessed — detector unavailable in current V1.',
-    versionPhase: 'Post-Milestone A',
-  },
-  {
-    id: 'fs.unallocated_clusters',
-    name: 'Unallocated Cluster Remnant Scanning',
-    status: 'UNAVAILABLE',
-    explanation:
-      'Raw volume cluster carving in unallocated space is not supported by current target provider.',
-    limitation: 'Not assessed — raw volume acquisition unavailable.',
-    versionPhase: 'Post-Milestone A',
-  },
-  {
-    id: 'hardware.nand_inspection',
-    name: 'SSD / NVMe Controller Out-of-Band Inspection',
-    status: 'UNAVAILABLE',
-    explanation:
-      'Hardware controller wear-leveling NAND inspection is physically unsupported in software-only console.',
-    limitation: 'Physical silicon inspection requires hardware testbench.',
-    versionPhase: 'Out of Scope',
-  },
-  {
-    id: 'crypto.ed25519_attestation',
-    name: 'Ed25519 Cryptographic Attestation Certificates',
-    status: 'LIMITED',
-    explanation: 'Digital evidence signatures and Merkle root verification.',
-    limitation: 'Awaiting Milestone A certificate issuance backend integration.',
-    versionPhase: 'Phase 7 (Milestone A)',
-  },
-] as const
-
 export type CapabilityId =
+  | 'auth.login'
+  | 'auth.me'
+  | 'auth.logout'
   | 'targets.analyze'
   | 'targets.get'
   | 'operations.create'
   | 'operations.get'
+  | 'operations.approve'
+  | 'operations.execute'
   | 'operations.cancel'
   | 'operations.events'
   | 'recovery.list'
   | 'recovery.restore'
   | 'certificates.get'
   | 'certificates.verify'
-  // Needed by the UI but absent from the contract. Kept so the gaps are explicit and reviewable.
+  | 'evidence.verify'
   | 'health'
+  // Absent from the contract. Each is kept here so the screen that would use it can name the gap
+  // precisely instead of rendering an empty success state.
   | 'operations.list'
   | 'targets.list'
   | 'audit.events'
@@ -106,44 +51,58 @@ export type CapabilityId =
 export interface Capability {
   readonly id: CapabilityId
   readonly method: 'GET' | 'POST'
-  /** Path template using `{param}` placeholders exactly as in the contract. */
+  /** Path template, with `{param}` placeholders resolved by `buildPath`. */
   readonly path: string
-  readonly inContract: boolean
-  readonly implemented: boolean
-  /** Backend phase from IMPLEMENTATION_PROGRESS.md that delivers this capability. */
-  readonly backendPhase: string
+  /** True when the call destroys or overwrites data and must carry an explicit confirmation. */
   readonly destructive: boolean
   readonly summary: string
+  /**
+   * Only meaningful for capabilities deliberately left out of the contract. Explains what the
+   * screen does instead, so the absence is a stated fact rather than a silent blank.
+   */
+  readonly gapNote?: string
 }
 
 export const CAPABILITIES: Readonly<Record<CapabilityId, Capability>> = {
+  'auth.login': {
+    id: 'auth.login',
+    method: 'POST',
+    path: '/api/auth/login',
+    destructive: false,
+    summary: 'Exchange credentials for an opaque bearer session token.',
+  },
+  'auth.me': {
+    id: 'auth.me',
+    method: 'GET',
+    path: '/api/auth/me',
+    destructive: false,
+    summary: 'Resolve the principal and granted permissions behind a credential.',
+  },
+  'auth.logout': {
+    id: 'auth.logout',
+    method: 'POST',
+    path: '/api/auth/logout',
+    destructive: false,
+    summary: 'Revoke the active session server-side.',
+  },
   'targets.analyze': {
     id: 'targets.analyze',
     method: 'POST',
     path: '/api/targets/analyze',
-    inContract: true,
-    implemented: true,
-    backendPhase: 'Phase 1 — Discovery + Profiling + Dry-run',
     destructive: false,
-    summary: 'Analyze a filesystem target (read-only).',
+    summary: 'Analyze a filesystem target.',
   },
   'targets.get': {
     id: 'targets.get',
     method: 'GET',
     path: '/api/targets/{target_id}',
-    inContract: true,
-    implemented: false,
-    backendPhase: 'Phase 1 — Discovery + Profiling + Dry-run',
     destructive: false,
-    summary: 'Fetch a previously analyzed target.',
+    summary: 'Fetch an analyzed target.',
   },
   'operations.create': {
     id: 'operations.create',
     method: 'POST',
     path: '/api/operations',
-    inContract: true,
-    implemented: false,
-    backendPhase: 'Phase 2 — Selective Permanent Deletion',
     destructive: true,
     summary: 'Create a validated erasure operation.',
   },
@@ -151,29 +110,34 @@ export const CAPABILITIES: Readonly<Record<CapabilityId, Capability>> = {
     id: 'operations.get',
     method: 'GET',
     path: '/api/operations/{operation_id}',
-    inContract: true,
-    implemented: false,
-    backendPhase: 'Phase 2 — Selective Permanent Deletion',
     destructive: false,
-    summary: 'Observe an operation by ID.',
+    summary: 'Get operation status.',
+  },
+  'operations.approve': {
+    id: 'operations.approve',
+    method: 'POST',
+    path: '/api/operations/{operation_id}/approve',
+    destructive: false,
+    summary: 'Approve a pending operation, subject to separation of duties.',
+  },
+  'operations.execute': {
+    id: 'operations.execute',
+    method: 'POST',
+    path: '/api/operations/{operation_id}/execute',
+    destructive: true,
+    summary: 'Execute an approved operation. Performs the real erasure.',
   },
   'operations.cancel': {
     id: 'operations.cancel',
     method: 'POST',
     path: '/api/operations/{operation_id}/cancel',
-    inContract: true,
-    implemented: false,
-    backendPhase: 'Phase 2 — Selective Permanent Deletion',
     destructive: false,
-    summary: 'Request cancellation of an operation.',
+    summary: 'Request cancellation.',
   },
   'operations.events': {
     id: 'operations.events',
     method: 'GET',
     path: '/api/operations/{operation_id}/events',
-    inContract: true,
-    implemented: false,
-    backendPhase: 'Phase 6 — Evidence Chain',
     destructive: false,
     summary: 'Evidence events for an operation.',
   },
@@ -181,9 +145,6 @@ export const CAPABILITIES: Readonly<Record<CapabilityId, Capability>> = {
     id: 'recovery.list',
     method: 'GET',
     path: '/api/recovery-objects',
-    inContract: true,
-    implemented: false,
-    backendPhase: 'Phase 10 — Vault (Milestone B)',
     destructive: false,
     summary: 'List authorized recovery objects.',
   },
@@ -191,119 +152,123 @@ export const CAPABILITIES: Readonly<Record<CapabilityId, Capability>> = {
     id: 'recovery.restore',
     method: 'POST',
     path: '/api/recovery-objects/{recovery_id}/restore',
-    inContract: true,
-    implemented: false,
-    backendPhase: 'Phase 10 — Vault (Milestone B)',
     destructive: true,
-    summary: 'Restore a controlled-recoverable object.',
+    summary: 'Restore a controlled-recoverable object to a destination.',
   },
   'certificates.get': {
     id: 'certificates.get',
     method: 'GET',
     path: '/api/certificates/{certificate_id}',
-    inContract: true,
-    implemented: false,
-    backendPhase: 'Phase 7 — Certificates (Milestone A)',
     destructive: false,
-    summary: 'Fetch a certificate.',
+    summary: 'Fetch an issued certificate.',
   },
   'certificates.verify': {
     id: 'certificates.verify',
     method: 'POST',
     path: '/api/certificates/{certificate_id}/verify',
-    inContract: true,
-    implemented: false,
-    backendPhase: 'Phase 7 — Certificates (Milestone A)',
     destructive: false,
-    summary: 'Verify certificate integrity and signature.',
+    summary: 'Verify a certificate and return dimension-level results.',
+  },
+  'evidence.verify': {
+    id: 'evidence.verify',
+    method: 'POST',
+    path: '/api/evidence/verify',
+    destructive: false,
+    summary: 'Verify a raw evidence package signature against an Ed25519 public key.',
   },
   health: {
     id: 'health',
     method: 'GET',
-    path: '/api/health',
-    inContract: false,
-    implemented: false,
-    backendPhase: 'Not in contract (docs/API.md gap API-003)',
+    path: '/health',
     destructive: false,
-    summary: 'Backend health.',
+    summary: 'Unauthenticated liveness probe.',
   },
+  // --- deliberately not in the contract -------------------------------------------------
   'operations.list': {
     id: 'operations.list',
     method: 'GET',
     path: '/api/operations',
-    inContract: false,
-    implemented: false,
-    backendPhase: 'Not in contract',
     destructive: false,
     summary: 'List operations.',
+    gapNote:
+      'The contract publishes no operation collection route, so the console cannot enumerate ' +
+      'operations. It opens a specific operation by ID instead of showing a fabricated table.',
   },
   'targets.list': {
     id: 'targets.list',
     method: 'GET',
     path: '/api/targets',
-    inContract: false,
-    implemented: false,
-    backendPhase: 'Not in contract',
     destructive: false,
     summary: 'List analyzed targets.',
+    gapNote:
+      'No target collection route is published; targets are addressed by ID after analysis.',
   },
   'audit.events': {
     id: 'audit.events',
     method: 'GET',
     path: '/api/audit/events',
-    inContract: false,
-    implemented: false,
-    backendPhase: 'Not in contract (docs/API.md gap API-003)',
     destructive: false,
     summary: 'Audit timeline.',
+    gapNote:
+      'Audit events are persisted by the backend but no read endpoint is published, so the audit ' +
+      'timeline cannot be displayed. Per-operation evidence events are available instead.',
   },
   'assurance.get': {
     id: 'assurance.get',
     method: 'GET',
     path: '/api/assurance/{operation_id}',
-    inContract: false,
-    implemented: false,
-    backendPhase: 'Not in contract (docs/API.md gap API-003)',
     destructive: false,
     summary: 'Assurance assessment for an operation.',
+    gapNote:
+      'The assurance engine exists in the backend and its result is embedded in signed evidence, ' +
+      'but no assurance read endpoint is published. Assurance is therefore reported as not ' +
+      'retrievable rather than evaluated here.',
   },
   'certificates.list': {
     id: 'certificates.list',
     method: 'GET',
     path: '/api/certificates',
-    inContract: false,
-    implemented: false,
-    backendPhase: 'Not in contract',
     destructive: false,
     summary: 'List certificates.',
+    gapNote:
+      'No certificate collection route is published, so certificates are looked up by ID rather ' +
+      'than listed.',
   },
   'residual.findings': {
     id: 'residual.findings',
     method: 'GET',
     path: '/api/operations/{operation_id}/residuals',
-    inContract: false,
-    implemented: false,
-    backendPhase: 'Not in contract',
     destructive: false,
     summary: 'Residual findings for an operation.',
+    gapNote:
+      'Residual analysis runs in the backend and is recorded in evidence events, but no residual ' +
+      'findings endpoint is published, so findings cannot be listed.',
   },
+}
+
+/** True when the generated contract publishes this exact operation. */
+export function isInContract(id: CapabilityId): boolean {
+  const c = CAPABILITIES[id]
+  return isContractOperation(c.method, c.path)
 }
 
 export function getCapability(id: CapabilityId): Capability {
   return CAPABILITIES[id]
 }
 
+/**
+ * Whether the console may call this operation. Derived from the contract alone: the frontend does
+ * not maintain a private opinion about what the backend has shipped.
+ */
 export function isAvailable(id: CapabilityId): boolean {
-  const c = CAPABILITIES[id]
-  return c.inContract && c.implemented
+  return isInContract(id)
 }
 
 /** Operator-facing reason a capability is unavailable, or null when it is available. */
 export function unavailableReason(id: CapabilityId): string | null {
   const c = CAPABILITIES[id]
-  if (!c.inContract) return 'Not defined in the API contract (OPENAPI.yaml v0.1.0).'
-  if (!c.implemented) return `Awaiting backend: ${c.backendPhase}.`
-  return null
+  if (isInContract(id)) return null
+  return c.gapNote ?? `The contract publishes no ${c.method} ${c.path} operation.`
 }
 
 /** Substitutes `{param}` placeholders with URL-encoded values. */
@@ -314,3 +279,22 @@ export function buildPath(id: CapabilityId, params: Record<string, string> = {})
     return encodeURIComponent(value)
   })
 }
+
+/**
+ * Capabilities whose intent disagrees with the generated contract.
+ *
+ * A `gapNote` marks a capability as expected-absent; everything else is expected-present. Either
+ * disagreement means the registry and the application have drifted, which is the failure this
+ * design removes. `capabilities.test.ts` asserts this list is empty.
+ */
+export function contractDrift(): { id: CapabilityId; expected: boolean; actual: boolean }[] {
+  const drift: { id: CapabilityId; expected: boolean; actual: boolean }[] = []
+  for (const key of Object.keys(CAPABILITIES) as CapabilityId[]) {
+    const c = CAPABILITIES[key]
+    const expected = c.gapNote === undefined
+    const actual = isInContract(key)
+    if (expected !== actual) drift.push({ id: key, expected, actual })
+  }
+  return drift
+}
+

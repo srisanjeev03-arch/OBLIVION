@@ -8,14 +8,13 @@ import {
   unavailableReason,
   type CapabilityId,
 } from './capabilities'
-import { queryKeys } from './queries'
+import { queryKeys, type CertificateVerificationOut } from './queries'
 import type {
   CreateOperationRequest,
   Operation,
   RestoreRequest,
   TargetAnalyzeRequest,
   TargetProfile,
-  VerificationResult,
 } from './types'
 
 /**
@@ -78,12 +77,22 @@ export function useRestoreRecoveryObjectMutation(recoveryId: string) {
   })
 }
 
+/**
+ * POST /api/certificates/{id}/verify — the backend's Ed25519 verification, returning one result per
+ * verification dimension plus an overall status.
+ *
+ * The console does not verify anything itself and never did: there is no frontend crypto here.
+ */
 export function useVerifyCertificateMutation(certificateId: string) {
-  return useMutation<VerificationResult, ApiError, void>({
+  const qc = useQueryClient()
+  return useMutation<CertificateVerificationOut, ApiError, void>({
     mutationFn: () =>
-      gatedMutation<undefined, VerificationResult>('certificates.verify', {
+      gatedMutation<undefined, CertificateVerificationOut>('certificates.verify', {
         certificate_id: certificateId,
       })(undefined),
     retry: false,
+    onSuccess: (result) => {
+      qc.setQueryData(queryKeys.certificateVerification(certificateId), result)
+    },
   })
 }

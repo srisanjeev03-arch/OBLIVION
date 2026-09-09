@@ -183,8 +183,17 @@ export function isOperationState(value: unknown): value is OperationState {
 /* Assurance, certificate verification, sensitivity                                            */
 /* ------------------------------------------------------------------------------------------ */
 
+/**
+ * Assurance vocabulary aligned to the backend's `AssuranceStatus` enum
+ * (`src/oblivion/core/assurance/models.py`): PASSED, FAILED, PARTIAL, INCONCLUSIVE.
+ *
+ * NOT_EVALUATED is the console's own state and is deliberately not a backend value: it means "no
+ * assurance result has been retrieved", which is a fact about this session rather than about the
+ * operation. The previous vocabulary used VALIDATED, a term the backend never emits — it came from
+ * the mock scaffold and would have rendered a status no API response could ever produce.
+ */
 export const ASSURANCE_STATES = [
-  'VALIDATED',
+  'PASSED',
   'PARTIAL',
   'INCONCLUSIVE',
   'FAILED',
@@ -193,8 +202,8 @@ export const ASSURANCE_STATES = [
 export type AssuranceState = (typeof ASSURANCE_STATES)[number]
 
 export const assuranceStateMeta: Readonly<Record<AssuranceState, StatusMeta>> = {
-  VALIDATED: {
-    label: 'Validated',
+  PASSED: {
+    label: 'Passed',
     tone: 'success',
     description: 'Evidence supports the claimed result within the supported scope.',
   },
