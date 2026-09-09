@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { AlertTriangle, ArrowRight, Crosshair, HardDrive, Search } from 'lucide-react'
 import { Link } from 'react-router'
 import { useAnalyzeTargetMutation } from '@/lib/api/mutations'
@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { StatusBadge } from '@/components/status/StatusBadge'
 import { EmptyState, ErrorState, LoadingState } from '@/components/states'
-import { EvidenceId } from '@/components/evidence/EvidenceId'
+import { EvidenceId } from '@/features/evidence/components/EvidenceId'
 import { Badge } from '@/components/ui/Badge'
 import { AIPanel } from '@/components/ai/AIPanel'
 import type { AIAnalysisData } from '@/components/ai/AIAnalysisDrawer'
@@ -135,7 +135,7 @@ export function Targets() {
               <div className="p-4">
                 <MetaList>
                   <Meta label="Target ID" mono>
-                    {profile.id ? <EvidenceId value={profile.id} label="Target ID" /> : '—'}
+                    {profile.id ? <EvidenceId value={profile.id} label="Target ID" /> : 'â€”'}
                   </Meta>
                   <Meta label="Resolved Path" mono>
                     {profile.path ?? targetPath}
@@ -155,7 +155,7 @@ export function Targets() {
                     {profile.sha256 ? (
                       <span className="text-[0.75rem] text-accent break-all">{profile.sha256}</span>
                     ) : (
-                      '—'
+                      'â€”'
                     )}
                   </Meta>
                 </MetaList>
@@ -210,7 +210,7 @@ export function Targets() {
                 aiData={aiSensitivity}
                 confidence={undefined}
                 summary="The AI advisory layer is not yet integrated for target sensitivity classification. Authoritative content classification and policy recommendation are derived from backend deterministic evidence only."
-                drawerSubtitle="AI ADVISORY — Sensitive Data Classification"
+                drawerSubtitle="AI ADVISORY â€” Sensitive Data Classification"
               />
             )}
 

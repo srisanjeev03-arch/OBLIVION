@@ -1,9 +1,9 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { FileSearch, AlertTriangle, Info, Layers } from 'lucide-react'
 import { PageHeader } from '@/components/shell/PageHeader'
 import { Badge } from '@/components/ui/Badge'
 import { DataTable, type ColumnDef } from '@/components/ui/DataTable'
-import { EvidenceId } from '@/components/evidence/EvidenceId'
+import { EvidenceId } from '@/features/evidence/components/EvidenceId'
 import { InspectorDrawer } from '@/components/shell/InspectorDrawer'
 import { UnavailableState, EmptyState } from '@/components/states'
 import { CapabilityBadge } from '@/components/status/CapabilityBadge'
@@ -149,13 +149,13 @@ export function ResidualAnalysis() {
       />
 
       <div className="flex-1 p-6 space-y-6 max-w-7xl">
-        {/* AI Advisory — Residual Finding Classification */}
+        {/* AI Advisory â€” Residual Finding Classification */}
         {aiEnabled && (
           <AIPanel
             title="Residual Finding Classification"
             state="UNAVAILABLE"
             summary="The AI advisory layer is not yet integrated for residual finding classification. Authoritative forensic classification is derived from backend deterministic cluster and MFT analysis."
-            drawerSubtitle="AI ADVISORY — Residual Finding Classification"
+            drawerSubtitle="AI ADVISORY â€” Residual Finding Classification"
           />
         )}
 
@@ -214,7 +214,7 @@ export function ResidualAnalysis() {
             caption="Residual Findings"
             emptyContent={
               <EmptyState
-                title="Not Assessed — Capability Unavailable in Current V1"
+                title="Not Assessed â€” Capability Unavailable in Current V1"
                 description="Deep unallocated cluster and MFT carving was not performed as the detector is unavailable."
               />
             }

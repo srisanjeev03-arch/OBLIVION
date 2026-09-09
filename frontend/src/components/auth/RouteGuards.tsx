@@ -1,7 +1,7 @@
-import type { ReactNode } from 'react'
+﻿import type { ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router'
 import { useAuth } from '@/lib/auth/context'
-import { Unauthorized } from '@/pages/Unauthorized'
+import { Unauthorized } from '@/features/authentication/pages/Unauthorized'
 import type { PermissionKey } from '@/lib/auth/types'
 
 /**
@@ -40,7 +40,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
  * Route guard for a required permission.
  *
  * This mirrors the backend's RBAC so an operator is not offered actions they cannot perform. It is
- * presentation only — a hidden button is not a security control, and the authoritative decision is
+ * presentation only â€” a hidden button is not a security control, and the authoritative decision is
  * the backend's 403, which `AuthProvider` handles separately by surfacing a notice while keeping
  * the session alive.
  */

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { KeyRound, Lock, RotateCcw, Clock, CheckCircle2 } from 'lucide-react'
 import { PageHeader } from '@/components/shell/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
 import { Dialog } from '@/components/ui/Dialog'
 import { DataTable, type ColumnDef } from '@/components/ui/DataTable'
-import { EvidenceId } from '@/components/evidence/EvidenceId'
+import { EvidenceId } from '@/features/evidence/components/EvidenceId'
 import { EmptyState, LoadingState, UnavailableState } from '@/components/states'
 import { useRecoveryObjectsQuery, useRestoreRecoveryObjectMutation } from '@/lib/api'
 import { isAvailable } from '@/lib/api/capabilities'
@@ -135,13 +135,13 @@ export function RecoveryVault() {
       />
 
       <div className="flex-1 p-6 space-y-6 max-w-7xl">
-        {/* AI Advisory — Recovery Risk Prediction */}
+        {/* AI Advisory â€” Recovery Risk Prediction */}
         {aiEnabled && (
           <AIPanel
             title="Recovery Risk Prediction"
             state="UNAVAILABLE"
             summary="The AI advisory layer is not yet integrated for recovery risk prediction. Recovery authorization is operator-controlled via the authoritative backend vault."
-            drawerSubtitle="AI ADVISORY — Recovery Risk Prediction"
+            drawerSubtitle="AI ADVISORY â€” Recovery Risk Prediction"
           />
         )}
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import {
   Flame,
@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Dialog } from '@/components/ui/Dialog'
-import { EvidenceId } from '@/components/evidence/EvidenceId'
+import { EvidenceId } from '@/features/evidence/components/EvidenceId'
 import { EmptyState } from '@/components/states'
 import { useCreateOperationMutation, useTargetQuery } from '@/lib/api'
 import { useUIStore } from '@/stores/ui.store'
@@ -343,7 +343,7 @@ export function ErasureWorkflow() {
                     <div>
                       <dt className="inline">Approval required: </dt>
                       <dd className="inline text-fg">
-                        {selectedPolicy.requires_approval ? 'yes — separate principal' : 'no'}
+                        {selectedPolicy.requires_approval ? 'yes â€” separate principal' : 'no'}
                       </dd>
                     </div>
                   </dl>
@@ -363,13 +363,13 @@ export function ErasureWorkflow() {
               </p>
             </div>
 
-            {/* AI Advisory — Sanitization Strategy Recommendation */}
+            {/* AI Advisory â€” Sanitization Strategy Recommendation */}
             {aiEnabled && (
               <AIPanel
                 title="Sanitization Strategy Recommendation"
                 state="UNAVAILABLE"
                 summary="The AI advisory layer is not yet integrated for sanitization strategy recommendation. Authoritative policy selection is operator-controlled based on backend media profile and forensic standards."
-                drawerSubtitle="AI ADVISORY — Sanitization Strategy Recommendation"
+                drawerSubtitle="AI ADVISORY â€” Sanitization Strategy Recommendation"
               />
             )}
 

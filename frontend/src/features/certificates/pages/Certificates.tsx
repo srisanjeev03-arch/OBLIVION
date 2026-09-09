@@ -4,8 +4,8 @@ import { PageHeader } from '@/components/shell/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Panel, PanelHeader } from '@/components/ui/Panel'
-import { EvidenceHash } from '@/components/evidence/EvidenceId'
-import { CertificateVerificationPanel } from '@/components/certificate/CertificateVerificationPanel'
+import { EvidenceHash } from '@/features/evidence/components/EvidenceId'
+import { CertificateVerificationPanel } from '@/features/certificates/components/CertificateVerificationPanel'
 import { EmptyState, ErrorState, LoadingState } from '@/components/states'
 import {
   useCertificateQuery,
