@@ -20,6 +20,8 @@ dev = [
     "httpx>=0.26.0",
     "mypy>=1.7.0",
     "ruff>=0.3.0",
+    # docs/OPENAPI.yaml is generated from the app by scripts/gen_openapi.py.
+    "pyyaml>=6.0",
 ]
 
 [build-system]
