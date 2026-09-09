@@ -1,18 +1,8 @@
-"""Deterministic canonicalization for Evidence Packages."""
-import json
-from typing import Any, Dict
+"""Deterministic canonicalization for Evidence Packages.
 
-def canonicalize(data: Dict[str, Any]) -> str:
-    """
-    Canonicalizes a dictionary into a deterministic JSON string.
-    - Sorted keys.
-    - No whitespace.
-    - Consistent encoding.
-    """
-    return json.dumps(
-        data,
-        sort_keys=True,
-        ensure_ascii=True,
-        separators=(',', ':'),
-        default=str # Fallback for non-serializable types if any
-    )
+This module is kept for backwards compatibility. The authoritative
+implementation lives in :mod:`oblivion.core.evidence.canonicalize`.
+"""
+from oblivion.core.evidence.canonicalize import canonical_hash, canonicalize
+
+__all__ = ["canonicalize", "canonical_hash"]

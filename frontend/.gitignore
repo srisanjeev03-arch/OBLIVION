@@ -1,0 +1,26 @@
+node_modules
+dist
+coverage
+.env
+.env.local
+*.local
+.vite
+*.log
+.DS_Store
+Thumbs.db
+
+# Scratch output from local verification runs.
+.vitest*.log
+.lint.log
+
+# Dead code kept for review instead of deletion (no git history to recover from yet).
+.quarantine/
+
+# Trees in this workspace that are not part of this application. They break type-aware
+# linting and pollute search results if left in scope.
+frontend oblivion/
+H--frontend/
+
+# Agent transcripts.
+.claude/
+
