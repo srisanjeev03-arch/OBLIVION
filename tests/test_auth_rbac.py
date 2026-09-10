@@ -215,7 +215,7 @@ class TestAdminBootstrapSafety:
 
 
 class TestSoDInOperationWorkflow:
-    def test_operation_approve_sod_violation_returns_403(self, auth_client, temp_dir):
+    def test_spoofed_approver_identity_is_ignored(self, admin_client, temp_dir):
         # Create operation requested by 'inv_user_1'
         session_factory = get_session_factory()
         op_id = f"op_sod_{datetime.datetime.now().timestamp()}"
@@ -232,12 +232,40 @@ class TestSoDInOperationWorkflow:
             )
             session.commit()
 
-        # Inv_user_1 attempts to approve own operation -> 403 FORBIDDEN
-        resp = auth_client.post(f"/api/operations/{op_id}/approve?approver_id=inv_user_1")
+        # The approver is derived from the authenticated session, never from the
+        # request. This previously passed ?approver_id=inv_user_1, a contract in
+        # which the caller named its own actor identity - exactly what must not
+        # be supported. The query parameter below is deliberately retained and
+        # deliberately ignored: it proves that supplying it changes nothing.
+        resp = admin_client.post(
+            f"/api/operations/{op_id}/approve?approver_id=inv_user_1"
+        )
+        # The authenticated admin is not the requester, so separation of duties
+        # permits the approval and the spoofed identity has no effect.
+        assert resp.status_code == 200
+        assert resp.json()["state"] == "READY"
+
+    def test_requester_cannot_approve_their_own_operation(self, admin_client, temp_dir):
+        """Separation of duties, using the server-derived actor identity."""
+        session_factory = get_session_factory()
+        op_id = f"op_sod_self_{datetime.datetime.now().timestamp()}"
+        tgt_id = f"tgt_sod_self_{datetime.datetime.now().timestamp()}"
+
+        # Discover who the authenticated caller actually is.
+        me = admin_client.get("/api/auth/me").json()
+
+        with session_factory() as session:
+            repo = OperationRepository(session)
+            repo.create_target(tgt_id, str(temp_dir), str(temp_dir), "file")
+            repo.create_operation(
+                operation_id=op_id,
+                target_id=tgt_id,
+                mode="SELECTIVE_PERMANENT",
+                requested_by=me["id"],
+                state="PENDING_APPROVAL",
+            )
+            session.commit()
+
+        resp = admin_client.post(f"/api/operations/{op_id}/approve")
         assert resp.status_code == 403
         assert resp.json()["error_code"] == "FORBIDDEN"
-
-        # Distinct approver succeeds -> 200 OK
-        resp_ok = auth_client.post(f"/api/operations/{op_id}/approve?approver_id=admin_user_2")
-        assert resp_ok.status_code == 200
-        assert resp_ok.json()["state"] == "READY"

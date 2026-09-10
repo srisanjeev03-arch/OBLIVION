@@ -104,6 +104,53 @@ def _verify(client, certificate_id, body=None):
 
 
 # ---------------------------------------------------------------------------
+# Persistence round trip
+# ---------------------------------------------------------------------------
+
+def test_reloaded_certificate_is_byte_identical_to_the_issued_one(issued):
+    """Storage must not alter a signed artifact in any way.
+
+    If persistence changed the canonical payload - reordered a key, dropped a
+    null, or lost a timezone offset - the certificate would fail its own
+    signature after a restart, and the failure would be indistinguishable from
+    tampering. This asserts the exact identity of every signed field.
+    """
+    session_factory = get_session_factory()
+
+    with session_factory() as session:
+        repo = CertificateRepository(session)
+        reloaded = repo.load_certificate(issued["certificate_id"])
+        reloaded_evidence = repo.load_evidence(issued["evidence_id"])
+
+    assert reloaded is not None
+    assert reloaded_evidence is not None
+
+    # Stable identifiers and digests
+    assert reloaded.certificate_id == issued["certificate_id"]
+    assert reloaded.operation_id == issued["operation_id"]
+    assert reloaded.target_identity == issued["target_identity"]
+    assert reloaded.evidence_digest == issued["evidence_digest"]
+    assert reloaded.signer_id == SIGNER_ID
+    assert reloaded.key_id == issued["key_manager"].key_id
+
+    # The evidence still hashes to what the certificate recorded.
+    assert reloaded_evidence.digest() == reloaded.evidence_digest
+
+    # Timezone survived the round trip, so the signed payload is unchanged.
+    assert reloaded.issued_at.tzinfo is not None
+    assert reloaded.signing_bytes()
+
+    # And the signature still verifies against the reloaded payload.
+    from oblivion.certificate.signer import Ed25519SignerVerifier
+
+    assert Ed25519SignerVerifier.verify(
+        issued["key_manager"].public_key_bytes(),
+        reloaded.signing_bytes(),
+        bytes.fromhex(reloaded.signature),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Authorization
 # ---------------------------------------------------------------------------
 

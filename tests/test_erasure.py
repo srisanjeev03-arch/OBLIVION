@@ -58,8 +58,13 @@ def test_nonexistent_target(engine):
     result = erasure_engine.execute_selective_permanent_deletion("op3", str(path), erasure_engine.validator.get_volume_serial(str(allowed_root)))
 
     assert result["status"] == "FAILED"
-    # It raises ValueError, which is caught and results in failed
-    assert len(result["failed"]) > 0
+    # A target whose identity cannot be established is refused at validation,
+    # before any deletion is attempted, so it is recorded as *blocked* rather
+    # than *failed*. This previously asserted "failed", which was the contract
+    # of an older engine that attempted the operation and caught a ValueError.
+    # Refusing earlier is the safer behaviour; the assertion follows the engine.
+    assert len(result["blocked"]) > 0
+    assert result["successful"] == []
 
 def test_path_traversal_blocked(engine):
     erasure_engine, allowed_root = engine

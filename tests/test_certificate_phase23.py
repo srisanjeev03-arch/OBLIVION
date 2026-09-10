@@ -387,13 +387,25 @@ def test_valid_digest_does_not_imply_chain_integrity(certificate, evidence, trus
 @pytest.mark.parametrize(
     "field,value",
     [
+        # Identity and issuance metadata
+        ("certificate_id", "cert_forged"),
+        ("issued_at", datetime(2020, 1, 1, tzinfo=UTC)),
+        # What the certificate is about
         ("operation_id", "op_forged"),
         ("target_identity", "H:/forged.txt"),
+        ("evidence_id", "ev_forged"),
         ("evidence_digest", "b" * 64),
         ("result", "FORGED"),
         ("method", "COMPLETE_ERASURE"),
+        # Who signed it
         ("signer_id", "someone-else"),
         ("key_id", "0000000000000000"),
+        # Version and schema fields, which decide how it is interpreted
+        ("version", "9.9.9"),
+        ("canonicalization_version", "OBLIVION-CANON-99"),
+        ("evidence_schema_version", "oblivion-evidence-99"),
+        # Caveats a reader relies on
+        ("limitations", ("no limitations at all",)),
     ],
 )
 def test_altering_any_signed_field_breaks_the_signature(
@@ -424,6 +436,54 @@ def test_malformed_structure_fails(certificate, evidence, trust_store):
     result = verify_certificate(broken, _full_context(evidence, trust_store))
     assert result.dimension(VerificationDimension.STRUCTURE).result is CheckResult.FAIL
     assert result.overall_status == VerificationStatus.INVALID.value
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("signature", "not-hex"),
+        ("signature", ""),
+        ("signature", "ab"),  # well-formed hex, wrong length
+        ("public_key", "not-hex"),
+        ("public_key", ""),
+        ("public_key", "ab" * 8),  # well-formed hex, wrong length
+    ],
+)
+def test_malformed_crypto_material_never_crashes_and_never_passes(
+    certificate, evidence, trust_store, field, value
+):
+    """Replacement for the deleted malformed-signature/empty-key tests.
+
+    Garbage in these fields must produce a verdict, not an exception, and that
+    verdict must never be VALID.
+    """
+    broken = replace(certificate, **{field: value})
+    result = verify_certificate(broken, _full_context(evidence, trust_store))
+    assert result.overall_status in (
+        VerificationStatus.INVALID.value,
+        VerificationStatus.INCONCLUSIVE.value,
+    )
+    assert result.overall_status != VerificationStatus.VALID.value
+
+
+def test_compatibility_shim_is_the_same_canonicalizer():
+    """Replacement for the deleted single-canonicalizer test.
+
+    ``canonical.py`` exists only as an import shim. If it ever grew its own
+    implementation, two modules would disagree about what bytes get signed.
+    """
+    import importlib
+
+    from oblivion.core.evidence import canonical
+
+    # Imported by module path: the package re-exports a *function* named
+    # `canonicalize`, which would otherwise shadow the module here.
+    canon_module = importlib.import_module("oblivion.core.evidence.canonicalize")
+
+    assert canonical.canonicalize is canon_module.canonicalize
+    assert canonical.canonical_hash is canon_module.canonical_hash
+    sample = {"b": None, "a": 1}
+    assert canonical.canonicalize(sample) == canon_module.canonicalize(sample)
 
 
 # ---------------------------------------------------------------------------

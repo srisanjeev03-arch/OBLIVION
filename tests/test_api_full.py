@@ -119,7 +119,15 @@ class TestOperationEndpoints:
         events_resp = client.get(f"/api/operations/{operation_id}/events")
         assert events_resp.status_code == 200
         events = events_resp.json()
-        assert len(events) >= 3
+        # This test analyzes, creates and reads - it never approves or executes.
+        # It previously asserted >= 3 events, which was the pre-approval-gate
+        # contract where creating an operation also ran it. Exactly one event is
+        # now correct, and it is evidence the gate holds: creation records the
+        # request and performs no destructive work.
+        assert len(events) == 1
+        assert events[0]["event_type"] == "OPERATION_REQUESTED"
+        assert events[0]["to_state"] == "PENDING_APPROVAL"
+        assert f.exists(), "creating an operation must not delete the target"
         # Check sequence order
         sequences = [e["sequence"] for e in events]
         assert sequences == sorted(sequences)
@@ -167,7 +175,25 @@ class TestOperationEndpoints:
         assert create_resp.json()["state"] == "PENDING_APPROVAL"
         assert f.exists()
 
-    def test_unauthorized_restore_blocked(self, client, temp_dir):
+    def test_recovery_object_listing_requires_a_configured_vault_key(
+        self, client, temp_dir, monkeypatch
+    ):
+        """The vault key is fail-closed, so the test must configure one.
+
+        Without OBLIVION_VAULT_KEY the endpoint answers 500
+        VAULT_KEY_UNAVAILABLE - correct fail-closed behaviour, not a defect.
+        This test previously asserted 200 without configuring a key, so it was
+        asserting that a deployment with no vault key still serves vault data.
+        Both halves are now covered explicitly.
+        """
+        monkeypatch.delenv("OBLIVION_VAULT_KEY", raising=False)
+        unconfigured = client.get("/api/recovery-objects")
+        assert unconfigured.status_code == 500
+        assert unconfigured.json()["error_code"] == "VAULT_KEY_UNAVAILABLE"
+
+        # A test-only key, generated here; never a deployment secret.
+        monkeypatch.setenv("OBLIVION_VAULT_KEY", "11" * 32)
+
         f = temp_dir / "vault_test.txt"
         f.write_text("test")
 
