@@ -1,9 +1,9 @@
 from oblivion.api.schemas.certificate import (
-    CertificateCreate,
     CertificateOut,
-    EvidenceRecordCreate,
+    CertificateVerificationOut,
+    CertificateVerificationRequest,
+    DimensionResultOut,
     EvidenceRecordOut,
-    VerificationResultOut,
 )
 from oblivion.api.schemas.error import (
     ErrorResponse,
@@ -45,12 +45,13 @@ __all__ = [
     "AssuranceResultOut",
     "BaselineCreate",
     "BaselineOut",
-    "CertificateCreate",
     "CertificateOut",
+    "CertificateVerificationOut",
+    "CertificateVerificationRequest",
     "ConfirmationInput",
     "CreateOperationRequest",
     "ErrorResponse",
-    "EvidenceRecordCreate",
+    "DimensionResultOut",
     "EvidenceRecordOut",
     "OperationCreate",
     "OperationEventOut",
@@ -69,6 +70,5 @@ __all__ = [
     "TargetCreate",
     "TargetOut",
     "TargetProfile",
-    "VerificationResultOut",
 ]
 

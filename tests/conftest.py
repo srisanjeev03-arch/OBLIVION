@@ -96,14 +96,15 @@ def safe_validator(temp_dir):
 # Admin, Operator, Investigator, Auditor, Viewer role fixtures
 # These fixtures create users with specific roles, login, and return auth headers
 
-@pytest.fixture
-def test_user_role(safe_validator, temp_dir, request):
-    """Create a user with a specific role and return auth headers.
+def authenticate_as_role(safe_validator, temp_dir, role_name):
+    """Create a user holding ``role_name`` and return real bearer headers.
 
-    Usage: parametrize with role name, e.g. pytest.param(Role.ADMIN, id='admin')
+    A plain function, not a fixture. The role-client fixtures below used to call
+    the fixture directly, which modern pytest refuses ("Fixture called
+    directly"), leaving every role client unusable. Authentication here goes
+    through the real login endpoint, so the token is genuine and RBAC is
+    exercised rather than bypassed.
     """
-
-    role_name = request.param
     init_db()
     session_factory = get_session_factory()
     with session_factory() as session:
@@ -142,7 +143,7 @@ def test_user_role(safe_validator, temp_dir, request):
 )
 def authenticated_client(request, safe_validator, temp_dir):
     """Parametrized fixture returning auth headers for each role."""
-    headers = test_user_role(safe_validator, temp_dir, request)
+    headers = authenticate_as_role(safe_validator, temp_dir, request.param)
     client = TestClient(app)
     client.headers.update(headers)
     return client
@@ -150,7 +151,7 @@ def authenticated_client(request, safe_validator, temp_dir):
 @pytest.fixture
 def admin_client(safe_validator, temp_dir):
     """Authenticated admin client."""
-    headers = test_user_role(safe_validator, temp_dir, Role.ADMIN)
+    headers = authenticate_as_role(safe_validator, temp_dir, Role.ADMIN)
     client = TestClient(app)
     client.headers.update(headers)
     return client
@@ -158,7 +159,7 @@ def admin_client(safe_validator, temp_dir):
 @pytest.fixture
 def operator_client(safe_validator, temp_dir):
     """Authenticated operator client."""
-    headers = test_user_role(safe_validator, temp_dir, Role.OPERATOR)
+    headers = authenticate_as_role(safe_validator, temp_dir, Role.OPERATOR)
     client = TestClient(app)
     client.headers.update(headers)
     return client
@@ -166,7 +167,7 @@ def operator_client(safe_validator, temp_dir):
 @pytest.fixture
 def investigator_client(safe_validator, temp_dir):
     """Authenticated investigator client."""
-    headers = test_user_role(safe_validator, temp_dir, Role.INVESTIGATOR)
+    headers = authenticate_as_role(safe_validator, temp_dir, Role.INVESTIGATOR)
     client = TestClient(app)
     client.headers.update(headers)
     return client
@@ -174,7 +175,7 @@ def investigator_client(safe_validator, temp_dir):
 @pytest.fixture
 def auditor_client(safe_validator, temp_dir):
     """Authenticated auditor client."""
-    headers = test_user_role(safe_validator, temp_dir, Role.AUDITOR)
+    headers = authenticate_as_role(safe_validator, temp_dir, Role.AUDITOR)
     client = TestClient(app)
     client.headers.update(headers)
     return client
@@ -182,7 +183,7 @@ def auditor_client(safe_validator, temp_dir):
 @pytest.fixture
 def viewer_client(safe_validator, temp_dir):
     """Authenticated viewer client."""
-    headers = test_user_role(safe_validator, temp_dir, Role.VIEWER)
+    headers = authenticate_as_role(safe_validator, temp_dir, Role.VIEWER)
     client = TestClient(app)
     client.headers.update(headers)
     return client

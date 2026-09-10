@@ -1,10 +1,29 @@
-"""Data models for Multi-Dimensional Certificate and Evidence Verification."""
+"""Result types for multi-dimensional certificate verification.
+
+Ten dimensions, four states, and an aggregate. The shape is the point: a single
+boolean cannot say "the signature is mathematically fine but nobody trusts the
+signer", and that distinction is the whole reason this module exists.
+"""
+
+from __future__ import annotations
+
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import Enum
+
+#: Identifies the verifier implementation that produced a result. Recorded so a
+#: stored result can be traced to the logic that produced it.
+VERIFIER_VERSION = "oblivion-verifier-2"
 
 
 class VerificationDimension(str, Enum):
-    """The ten orthogonal dimensions of forensic certificate verification."""
+    """The ten orthogonal questions asked of a certificate.
+
+    These are not reducible. An earlier abandoned implementation aggregated over
+    six of them and ignored failures in the other four, which meant a
+    certificate bound to the wrong target could still verify.
+    """
+
     STRUCTURE = "STRUCTURE"
     VERSION_COMPATIBILITY = "VERSION_COMPATIBILITY"
     EVIDENCE_AVAILABILITY = "EVIDENCE_AVAILABILITY"
@@ -18,7 +37,13 @@ class VerificationDimension(str, Enum):
 
 
 class CheckResult(str, Enum):
-    """Result of evaluating a single verification dimension."""
+    """Outcome of one dimension.
+
+    ``NOT_CHECKED`` and ``INCONCLUSIVE`` are distinct on purpose: the first means
+    the verifier had no input for the question, the second that it had input and
+    still could not decide. Neither is a pass.
+    """
+
     PASS = "PASS"
     FAIL = "FAIL"
     NOT_CHECKED = "NOT_CHECKED"
@@ -26,55 +51,60 @@ class CheckResult(str, Enum):
 
 
 class VerificationStatus(str, Enum):
-    """Overall aggregate verification status."""
     VALID = "VALID"
     INVALID = "INVALID"
     INCONCLUSIVE = "INCONCLUSIVE"
 
 
-@dataclass
+@dataclass(frozen=True)
 class DimensionResult:
-    """Result for one specific verification dimension."""
+    """One dimension's verdict, with the reason it reached that verdict."""
+
     dimension: VerificationDimension
     result: CheckResult
     detail: str
     evidence_ref: str | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class CertificateVerificationResult:
-    """Complete multi-dimensional verification report for a certificate."""
+    """The complete report for one certificate."""
+
     certificate_id: str
-    overall_status: str  # VALID | INVALID | INCONCLUSIVE
-    dimensions: list[DimensionResult]
+    overall_status: str
+    dimensions: tuple[DimensionResult, ...]
+    cannot_prove: tuple[str, ...] = ()
+    certificate_version: str | None = None
+    verifier_version: str = VERIFIER_VERSION
+    verified_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    #: Convenience views. None means the question was not answered.
     signature_valid: bool | None = None
     evidence_integrity: bool | None = None
     signer_trusted: bool | None = None
-    cannot_prove: list[str] = field(default_factory=list)
 
     @property
     def valid(self) -> bool:
-        """Backward-compatible boolean indicating overall VALID status."""
         return self.overall_status == VerificationStatus.VALID.value
 
-    @property
-    def status(self) -> str:
-        """Backward-compatible status string."""
-        return self.overall_status
+    def dimension(self, dimension: VerificationDimension) -> DimensionResult:
+        for item in self.dimensions:
+            if item.dimension is dimension:
+                return item
+        raise KeyError(f"Dimension {dimension.value} is missing from the result")
 
 
-@dataclass
+@dataclass(frozen=True)
 class VerificationResult:
-    """Backward-compatible verification result for legacy tests."""
+    """Narrow result for the raw-evidence signature helper."""
+
     valid: bool
     status: str
-    evidence_integrity: bool = True
-    signature_valid: bool = True
     reason: str = ""
     certificate_id: str | None = None
 
 
 __all__ = [
+    "VERIFIER_VERSION",
     "CertificateVerificationResult",
     "CheckResult",
     "DimensionResult",

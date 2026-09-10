@@ -475,7 +475,10 @@ paths:
       tags:
       - certificates
       summary: Get Certificate
-      description: Retrieve an issued certificate (requires evidence.view permission, no private key exposure).
+      description: 'Retrieve an issued certificate (requires evidence.view).
+
+
+        Returns the signer''s public key only; no private key exists in this API.'
       operationId: get_certificate_api_certificates__certificate_id__get
       parameters:
       - name: certificate_id
@@ -510,11 +513,20 @@ paths:
       tags:
       - certificates
       summary: Verify Certificate Endpoint
-      description: 'Verify certificate authenticity, evidence hash, and Ed25519 signature.
+      description: 'Verify a certificate across ten independent dimensions.
 
-        Requires evidence.verify permission.
 
-        Reports dimension-level results for explicit security status.'
+        The caller may supply the operation and target it *expects* this certificate
+
+        to attest to. It cannot supply the outcome: signer trust comes from the
+
+        server''s TrustStore, and evidence integrity is recomputed from the stored
+
+        evidence. A request that supplies no expectations gets ``INCONCLUSIVE``,
+
+        which is the truthful answer when nothing independent was available to check
+
+        against.'
       operationId: verify_certificate_endpoint_api_certificates__certificate_id__verify_post
       parameters:
       - name: certificate_id
@@ -531,6 +543,14 @@ paths:
           - type: string
           - type: 'null'
           title: Authorization
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/CertificateVerificationRequest'
+              - type: 'null'
+              title: Request
       responses:
         '200':
           description: Successful Response
@@ -606,9 +626,47 @@ components:
         operation_id:
           type: string
           title: Operation Id
+        evidence_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Evidence Id
         evidence_digest:
           type: string
           title: Evidence Digest
+        certificate_version:
+          type: string
+          title: Certificate Version
+        canonicalization_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Canonicalization Version
+        evidence_schema_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Evidence Schema Version
+        target_identity:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Identity
+        method:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Method
+        result:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Result
+        signer_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Signer Id
         signing_algorithm:
           type: string
           title: Signing Algorithm
@@ -637,6 +695,7 @@ components:
       - id
       - operation_id
       - evidence_digest
+      - certificate_version
       - signing_algorithm
       - public_key
       - signature
@@ -664,6 +723,23 @@ components:
           description: 'Exactly one result per verification dimension. A PASS on SIGNATURE_VALIDITY does not imply
             overall certificate validity: only overall_status does. NOT_CHECKED and INCONCLUSIVE are honest absences
             of evidence and must not be rendered as success.'
+        cannot_prove:
+          items:
+            type: string
+          type: array
+          title: Cannot Prove
+        certificate_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Certificate Version
+        verifier_version:
+          type: string
+          title: Verifier Version
+        verified_at:
+          type: string
+          format: date-time
+          title: Verified At
         signature_valid:
           anyOf:
           - type: boolean
@@ -679,17 +755,43 @@ components:
           - type: boolean
           - type: 'null'
           title: Signer Trusted
-        cannot_prove:
-          items:
-            type: string
-          type: array
-          title: Cannot Prove
       type: object
       required:
       - certificate_id
       - overall_status
       - dimensions
+      - verifier_version
+      - verified_at
       title: CertificateVerificationOut
+    CertificateVerificationRequest:
+      properties:
+        expected_operation_id:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Expected Operation Id
+          description: The operation the caller believes this certificate attests to. Compared against the certificate
+            and its evidence.
+        expected_target_identity:
+          anyOf:
+          - type: string
+            maxLength: 1024
+          - type: 'null'
+          title: Expected Target Identity
+          description: The target the caller believes this certificate attests to. Compared against the certificate
+            and its evidence.
+      additionalProperties: false
+      type: object
+      title: CertificateVerificationRequest
+      description: 'Independent expectations the caller brings to the verification.
+
+
+        Both are optional. Omitting one is honest - the corresponding dimension
+
+        reports ``NOT_CHECKED`` and the overall result becomes ``INCONCLUSIVE``
+
+        rather than pretending the check succeeded.'
     ConfirmationInput:
       properties:
         acknowledged_risk:
@@ -747,6 +849,7 @@ components:
           - TARGET_CONSISTENCY
         result:
           type: string
+          pattern: ^(PASS|FAIL|NOT_CHECKED|INCONCLUSIVE)$
           title: Result
           enum:
           - PASS

@@ -10,6 +10,11 @@ from sqlalchemy.orm import Session
 
 from oblivion.certificate.keys import SigningKeyError, SigningKeyManager
 from oblivion.certificate.signer import Ed25519SignerVerifier
+from oblivion.certificate.trust_model import (
+    TrustStore,
+    TrustStoreError,
+    load_trust_store_from_env,
+)
 from oblivion.core.auth.passwords import hash_session_token
 from oblivion.core.auth.rbac import has_permission
 from oblivion.core.erasure.events import EngineEventEmitter
@@ -234,6 +239,29 @@ def get_signer(
 ) -> Ed25519SignerVerifier:
     """Provides a signer bound to the configured, persistent identity."""
     return manager.signer()
+
+
+def get_trust_store() -> TrustStore:
+    """The trust anchors this deployment recognises.
+
+    Resolved per request from configuration rather than cached, so rotating a
+    trust anchor takes effect without a restart. An unconfigured deployment gets
+    a ``NullTrustStore``: no signer is trusted, ``SIGNER_TRUST`` reports
+    ``NOT_CHECKED``, and verification lands on ``INCONCLUSIVE``. That is the
+    correct posture - a certificate must never become trusted merely because it
+    carries a key that verifies its own signature.
+
+    Malformed configuration fails closed rather than silently trusting nothing,
+    because a typo in a trust anchor would otherwise look identical to a
+    deliberately unconfigured deployment.
+    """
+    try:
+        return load_trust_store_from_env()
+    except TrustStoreError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error_code": "TRUST_STORE_INVALID", "message": str(exc)},
+        )
 
 
 class DatabaseEventEmitter(EngineEventEmitter):
