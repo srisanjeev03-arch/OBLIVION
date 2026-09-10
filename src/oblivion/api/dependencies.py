@@ -25,6 +25,13 @@ from oblivion.persistence.models.audit import AuditEventModel
 from oblivion.persistence.models.operation import OperationEventModel
 from oblivion.persistence.models.user import UserModel
 from oblivion.persistence.repositories.user_repo import UserRepository
+from oblivion.privileged.client import PrivilegedClient
+from oblivion.privileged.service import RequestAuthenticator, build_service_from_env
+from oblivion.privileged.transport import (
+    InProcessTransport,
+    NamedPipeTransport,
+    Transport,
+)
 
 # The configured signing identity, resolved once per process. It is *loaded*,
 # never generated: see oblivion.certificate.keys for why implicit generation is
@@ -262,6 +269,48 @@ def get_trust_store() -> TrustStore:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error_code": "TRUST_STORE_INVALID", "message": str(exc)},
         )
+
+
+def get_privileged_client(
+    validator: SafePathValidator = Depends(get_safe_validator),
+) -> PrivilegedClient:
+    """The handle on the privileged service, or a clear 503.
+
+    Two transports, chosen by configuration rather than guessed:
+
+    * ``OBLIVION_PRIVILEGED_PIPE`` set - talk to a privileged host over its
+      named pipe. This is the deployment posture, and the only one that provides
+      real process isolation.
+    * unset - run the service in this process. Honest for development, and the
+      client reports ``isolated == False`` so nothing can mistake it for the
+      real boundary.
+
+    Without ``OBLIVION_IPC_KEY`` there is no way to authenticate a request, and
+    this raises 503 rather than inventing a key. A default secret would be
+    indistinguishable from no authentication at all, and a deployment that
+    forgot to configure IPC must fail loudly.
+    """
+    authenticator = RequestAuthenticator.from_env()
+    if authenticator is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error_code": "PRIVILEGED_SERVICE_UNAVAILABLE",
+                "message": (
+                    "OBLIVION_IPC_KEY is not configured, so privileged operations "
+                    "cannot be authenticated and will not be attempted."
+                ),
+            },
+        )
+
+    pipe_name = os.environ.get("OBLIVION_PRIVILEGED_PIPE")
+    transport: Transport
+    if pipe_name:
+        transport = NamedPipeTransport(pipe_name)
+    else:
+        transport = InProcessTransport(build_service_from_env(validator))
+
+    return PrivilegedClient(transport, authenticator)
 
 
 class DatabaseEventEmitter(EngineEventEmitter):

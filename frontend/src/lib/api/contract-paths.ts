@@ -24,6 +24,7 @@ export const CONTRACT_OPERATIONS: readonly string[] = [
   'POST /api/operations/{operation_id}/approve',
   'POST /api/operations/{operation_id}/cancel',
   'POST /api/operations/{operation_id}/execute',
+  'POST /api/operations/{operation_id}/pipeline',
   'POST /api/recovery-objects/{recovery_id}/restore',
   'POST /api/targets/analyze',
 ] as const

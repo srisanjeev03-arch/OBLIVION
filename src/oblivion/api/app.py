@@ -12,6 +12,7 @@ from oblivion.api.routes import (
     certificates_router,
     evidence_router,
     operations_router,
+    pipeline_router,
     recovery_router,
     targets_router,
 )
@@ -71,6 +72,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(targets_router)
     app.include_router(operations_router)
+    app.include_router(pipeline_router)
     app.include_router(recovery_router)
     app.include_router(certificates_router)
     app.include_router(evidence_router)

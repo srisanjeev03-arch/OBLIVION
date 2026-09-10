@@ -393,6 +393,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/operations/{operation_id}/pipeline:
+    post:
+      tags:
+      - pipeline
+      summary: Run Pipeline
+      description: 'Run an approved operation through the full closed loop.
+
+
+        Requires ``operation.execute``. Holding that permission is necessary but not
+
+        sufficient: the pipeline''s own AUTHORIZE stage additionally requires a
+
+        durable approval recorded by someone other than the requester, so a single
+
+        actor cannot both request and run a destructive operation.
+
+
+        A 200 does not mean the target was erased. It means the pipeline ran and
+
+        reported what happened - which may be a refusal. Read ``final_state`` and the
+
+        per-stage statuses.'
+      operationId: run_pipeline_api_operations__operation_id__pipeline_post
+      parameters:
+      - name: operation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Operation Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineResultOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/recovery-objects:
     get:
       tags:
@@ -618,6 +669,14 @@ paths:
       security: []
 components:
   schemas:
+    AssuranceStatusOut:
+      type: string
+      enum:
+      - PASSED
+      - PARTIAL
+      - INCONCLUSIVE
+      - FAILED
+      title: AssuranceStatusOut
     CertificateOut:
       properties:
         id:
@@ -1012,8 +1071,8 @@ components:
           type: string
           title: State
           description: 'Operation lifecycle state. Authoritative values: CREATED, ANALYZING, PENDING_APPROVAL, READY,
-            ERASING, VERIFYING, RECOVERY_TEST, RESIDUAL_SCAN, RESIDUAL_ANALYSIS, ASSESSING, CERTIFYING, COMPLETED,
-            PARTIAL, FAILED, INCONCLUSIVE, CANCELLED. Terminal states: COMPLETED, PARTIAL, FAILED, INCONCLUSIVE,
+            ERASING, VERIFYING, RECOVERY_TEST, RESIDUAL_SCAN, RESIDUAL_ANALYSIS, ASSESSING, CERTIFYING, RECONCILIATION_REQUIRED,
+            COMPLETED, PARTIAL, FAILED, INCONCLUSIVE, CANCELLED. Terminal states: COMPLETED, PARTIAL, FAILED, INCONCLUSIVE,
             CANCELLED. Consumers must render PARTIAL and INCONCLUSIVE as distinct outcomes and must never collapse
             them into success.'
         policy_id:
@@ -1065,6 +1124,134 @@ components:
       - state
       - created_at
       title: OperationOut
+    OperationStateOut:
+      type: string
+      enum:
+      - COMPLETED
+      - PARTIAL
+      - FAILED
+      - INCONCLUSIVE
+      - CANCELLED
+      title: OperationStateOut
+      description: Terminal states an operation can end the pipeline in.
+    PipelineResultOut:
+      properties:
+        operation_id:
+          type: string
+          title: Operation Id
+        target_identity:
+          type: string
+          title: Target Identity
+        final_state:
+          $ref: '#/components/schemas/OperationStateOut'
+        stages:
+          items:
+            $ref: '#/components/schemas/PipelineStageOut'
+          type: array
+          title: Stages
+        evidence_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Evidence Id
+        evidence_digest:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Evidence Digest
+        certificate_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Certificate Id
+        assurance_status:
+          anyOf:
+          - $ref: '#/components/schemas/AssuranceStatusOut'
+          - type: 'null'
+        verification_status:
+          anyOf:
+          - $ref: '#/components/schemas/VerificationStatusOut'
+          - type: 'null'
+        limitations:
+          items:
+            type: string
+          type: array
+          title: Limitations
+          description: What this operation did not establish, including recovery methods that were never attempted
+            and sanitization that was never performed.
+        privilege_isolated:
+          type: boolean
+          title: Privilege Isolated
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - operation_id
+      - target_identity
+      - final_state
+      - stages
+      title: PipelineResultOut
+      description: 'The whole run.
+
+
+        ``certificate_id`` is null whenever issuance was refused or unavailable, and
+
+        the corresponding stage says why. A null certificate is a normal, meaningful
+
+        outcome - it means nothing certifiable was established - and callers must not
+
+        treat it as an error.'
+    PipelineStage:
+      type: string
+      enum:
+      - DISCOVER
+      - BASELINE
+      - RECOMMEND
+      - AUTHORIZE
+      - ERASE
+      - VALIDATE
+      - TEST_RECOVERY
+      - ANALYZE_RESIDUALS
+      - ASSESS_ASSURANCE
+      - GENERATE_EVIDENCE
+      - ISSUE_CERTIFICATE
+      - VERIFY_CERTIFICATE
+      title: PipelineStage
+      description: The closed loop, in order. Mirrors ``core.pipeline.Stage``.
+    PipelineStageOut:
+      properties:
+        stage:
+          $ref: '#/components/schemas/PipelineStage'
+        status:
+          $ref: '#/components/schemas/PipelineStageStatus'
+        detail:
+          type: string
+          title: Detail
+          description: Why the stage ended as it did. Human-readable; never the only machine-readable signal - use
+            `status`.
+      additionalProperties: false
+      type: object
+      required:
+      - stage
+      - status
+      - detail
+      title: PipelineStageOut
+      description: One stage, and what it established.
+    PipelineStageStatus:
+      type: string
+      enum:
+      - COMPLETED
+      - REFUSED
+      - FAILED
+      - UNAVAILABLE
+      - SKIPPED
+      title: PipelineStageStatus
+      description: 'How a stage ended.
+
+
+        ``SKIPPED`` and ``UNAVAILABLE`` are distinct on the wire for the same reason
+
+        they are distinct internally: chosen not to run, versus tried and could not.'
     RecoveryConfig:
       properties:
         retention_seconds:
@@ -1326,6 +1513,14 @@ components:
       - msg
       - type
       title: ValidationError
+    VerificationStatusOut:
+      type: string
+      enum:
+      - VALID
+      - INVALID
+      - INCONCLUSIVE
+      - ERROR
+      title: VerificationStatusOut
   securitySchemes:
     bearerAuth:
       type: http
