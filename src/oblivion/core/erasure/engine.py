@@ -2,6 +2,7 @@ import hashlib
 import logging
 import os
 import shutil
+from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,65 @@ class ErasureMode(Enum):
     COMPLETE_ERASURE = auto()
     SELECTIVE_PERMANENT = auto()
     CONTROLLED_RECOVERABLE = auto()
+
+
+@dataclass(frozen=True)
+class ModeCapability:
+    """What a mode actually does, and what it therefore cannot prove.
+
+    Kept next to the code that performs the deletion so the claim and the
+    behaviour cannot drift apart. See ``docs/COMPLETE_ERASURE_STATUS.md``.
+    """
+
+    performs: str
+    limitations: tuple[str, ...]
+
+
+#: Honest capability statements. COMPLETE_ERASURE deliberately does not claim
+#: sanitization: this build performs no overwrite of any kind, so the two
+#: permanent modes differ in scope (tree vs single file) and not in the
+#: guarantee they can offer.
+_LOGICAL_ONLY = (
+    "Logical deletion only: the filesystem entry is removed. No overwrite of "
+    "file contents, slack space, free space or filesystem metadata is performed.",
+    "No device or media sanitization is performed or claimed. Content may remain "
+    "recoverable from unallocated space, journals, shadow copies, backups or "
+    "SSD over-provisioned areas.",
+    "Supported scope: NTFS files and directories on a mounted Windows volume.",
+)
+
+#: The mode-specific statement leads, so the first limitation a caller reads
+#: names the mode and its actual guarantee.
+MODE_CAPABILITY: dict[ErasureMode, ModeCapability] = {
+    ErasureMode.SELECTIVE_PERMANENT: ModeCapability(
+        performs="Unlinks a single validated file.",
+        limitations=(
+            "SELECTIVE_PERMANENT removes a single validated file by unlinking it. "
+            "No overwrite is performed.",
+        )
+        + _LOGICAL_ONLY,
+    ),
+    ErasureMode.COMPLETE_ERASURE: ModeCapability(
+        performs="Removes a validated directory tree (shutil.rmtree).",
+        limitations=(
+            "COMPLETE_ERASURE currently provides the same logical removal as "
+            "SELECTIVE_PERMANENT, applied to a whole tree. It is NOT a "
+            "sanitization mode and must not be described as one.",
+        )
+        + _LOGICAL_ONLY,
+    ),
+    ErasureMode.CONTROLLED_RECOVERABLE: ModeCapability(
+        performs=(
+            "Stores an authenticated encrypted copy in the vault, verifies it by "
+            "read-back, then unlinks the original."
+        ),
+        limitations=(
+            "CONTROLLED_RECOVERABLE retains the content in the recovery vault by "
+            "design; it is recoverable by an authorized actor holding the vault key.",
+        )
+        + _LOGICAL_ONLY,
+    ),
+}
 
 class ErasureEngine:
     """Performs erasure operations on validated targets."""
@@ -69,7 +129,7 @@ class ErasureEngine:
             "failed": [],
             "blocked": [],
             "warnings": [],
-            "limitations": ["Controlled recoverable deletion - requires vault verification before original deletion"],
+            "limitations": list(MODE_CAPABILITY[ErasureMode.CONTROLLED_RECOVERABLE].limitations),
             "vault_object_id": None,
         }
 
@@ -258,7 +318,7 @@ class ErasureEngine:
             "failed": [],
             "blocked": [],
             "warnings": [],
-            "limitations": [f"Logical deletion only - no physical sanitization guaranteed ({mode.name})"]
+            "limitations": list(MODE_CAPABILITY[mode].limitations),
         }
 
         try:
@@ -305,22 +365,16 @@ class ErasureEngine:
         self.state_machine.transition_to(State.ERASING)
         self.event_emitter.emit("STATE_CHANGE", operation_id, target_path, {"state": State.ERASING.name})
 
-        # Capability-aware erasure
-        if mode == ErasureMode.COMPLETE_ERASURE:
-            # In a real implementation, this would perform advanced overwriting
-            logger.info(f"Performing COMPLETE_ERASURE on {target_path}")
-        else:
-            logger.info(f"Performing SELECTIVE_PERMANENT deletion on {target_path}")
+        # Both permanent modes perform the same logical removal. Neither
+        # overwrites content: no sanitization pass exists in this build, and the
+        # reported limitations say so. Adding an overwrite here would change what
+        # the product may claim, so it is a deliberate implementation decision
+        # rather than a line of code - see docs/COMPLETE_ERASURE_STATUS.md.
+        logger.info("Performing %s (logical removal) on %s", mode.name, target_path)
 
         target = Path(target_path)
         try:
             if target.is_file():
-                # For COMPLETE_ERASURE, we might want to overwrite first
-                if mode == ErasureMode.COMPLETE_ERASURE:
-                    # Example of advanced deletion:
-                    # with open(target_path, "wb") as f:
-                    #     f.write(os.urandom(target.stat().st_size))
-                    pass
                 target.unlink()
             elif target.is_dir():
                 shutil.rmtree(target_path)

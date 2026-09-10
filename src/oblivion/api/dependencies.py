@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from oblivion.certificate.keys import SigningKeyError, SigningKeyManager
 from oblivion.certificate.signer import Ed25519SignerVerifier
 from oblivion.core.auth.passwords import hash_session_token
 from oblivion.core.auth.rbac import has_permission
@@ -20,8 +21,10 @@ from oblivion.persistence.models.operation import OperationEventModel
 from oblivion.persistence.models.user import UserModel
 from oblivion.persistence.repositories.user_repo import UserRepository
 
-# Global singleton Ed25519 signer instance for certificate issuance
-_GLOBAL_SIGNER: Ed25519SignerVerifier | None = None
+# The configured signing identity, resolved once per process. It is *loaded*,
+# never generated: see oblivion.certificate.keys for why implicit generation is
+# unsafe for a system that issues verifiable certificates.
+_SIGNING_KEY_MANAGER: SigningKeyManager | None = None
 
 
 
@@ -195,12 +198,42 @@ def get_recovery_vault(
 
 
 
-def get_signer() -> Ed25519SignerVerifier:
-    """Provides singleton Ed25519 signer."""
-    global _GLOBAL_SIGNER
-    if _GLOBAL_SIGNER is None:
-        _GLOBAL_SIGNER = Ed25519SignerVerifier.generate()
-    return _GLOBAL_SIGNER
+def get_signing_key_manager() -> SigningKeyManager:
+    """Returns the configured signing identity.
+
+    Fail-closed, in the same shape as ``get_vault_key``: a deployment with no
+    configured key cannot sign, and says so, rather than minting a throwaway
+    identity that would invalidate every certificate it had already issued.
+    ``SigningKeyError`` messages describe the shape of the problem and never
+    contain key material, so this is safe to surface.
+    """
+    global _SIGNING_KEY_MANAGER
+    if _SIGNING_KEY_MANAGER is None:
+        try:
+            _SIGNING_KEY_MANAGER = SigningKeyManager.from_environment()
+        except SigningKeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={"error_code": "SIGNING_KEY_UNAVAILABLE", "message": str(exc)},
+            )
+    return _SIGNING_KEY_MANAGER
+
+
+def reset_signing_key_manager() -> None:
+    """Drops the cached identity so a new configuration can be loaded.
+
+    Used by tests to simulate a process restart; production reloads by
+    restarting the service.
+    """
+    global _SIGNING_KEY_MANAGER
+    _SIGNING_KEY_MANAGER = None
+
+
+def get_signer(
+    manager: SigningKeyManager = Depends(get_signing_key_manager),
+) -> Ed25519SignerVerifier:
+    """Provides a signer bound to the configured, persistent identity."""
+    return manager.signer()
 
 
 class DatabaseEventEmitter(EngineEventEmitter):

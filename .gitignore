@@ -18,6 +18,8 @@ env/
 # ---- Tooling caches ----
 .mypy_cache/
 .pytest_cache/
+# Scratch area destructive tests erase inside (tests/conftest.py).
+.pytest-scratch/
 .ruff_cache/
 .coverage
 .coverage.*
