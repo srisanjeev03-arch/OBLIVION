@@ -13,6 +13,15 @@ class State(Enum):
     RESIDUAL_ANALYSIS = auto()
     ASSESSING = auto()
     CERTIFYING = auto()
+
+    #: The process stopped while an operation was in flight, so the persisted
+    #: state and the filesystem may disagree. Deliberately NOT terminal: it means
+    #: "nobody has established what happened yet", and something must look. A
+    #: crashed operation left in ERASING would be indistinguishable from one
+    #: still running, and one silently marked FAILED would assert that nothing
+    #: was destroyed - which is exactly what is not yet known.
+    RECONCILIATION_REQUIRED = auto()
+
     COMPLETED = auto()
     PARTIAL = auto()
     FAILED = auto()
@@ -39,7 +48,32 @@ class OperationStateMachine:
             State.RESIDUAL_ANALYSIS: {State.VERIFYING, State.PARTIAL, State.FAILED, State.INCONCLUSIVE, State.CANCELLED},
             State.ASSESSING: {State.CERTIFYING, State.INCONCLUSIVE, State.FAILED, State.CANCELLED},
             State.CERTIFYING: {State.COMPLETED, State.FAILED, State.CANCELLED},
+            # Reconciliation resolves to a definite outcome, or to INCONCLUSIVE
+            # when the filesystem cannot answer. It never returns to an
+            # in-flight state: the work that was interrupted is not resumed by
+            # deciding what happened to it.
+            State.RECONCILIATION_REQUIRED: {
+                State.COMPLETED,
+                State.PARTIAL,
+                State.FAILED,
+                State.INCONCLUSIVE,
+                State.CANCELLED,
+            },
         }
+
+        # Any stage that can be interrupted mid-flight may land here. Approval
+        # stages are excluded on purpose: nothing destructive has happened
+        # before READY, so an interrupted approval is simply not approved.
+        for interruptible in (
+            State.ERASING,
+            State.VERIFYING,
+            State.RECOVERY_TEST,
+            State.RESIDUAL_SCAN,
+            State.RESIDUAL_ANALYSIS,
+            State.ASSESSING,
+            State.CERTIFYING,
+        ):
+            self._transitions[interruptible].add(State.RECONCILIATION_REQUIRED)
 
 
         self._terminal_states = {
