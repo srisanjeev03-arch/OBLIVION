@@ -1,0 +1,753 @@
+{
+  "adversarial": {
+    "cases": 11,
+    "correct": 11,
+    "unsafe_claims": 0
+  },
+  "calibration": {
+    "expected_calibration_error": 0.3186,
+    "mean_confidence_when_correct": 0.6814,
+    "mean_confidence_when_wrong": 0.0,
+    "overconfidence": -0.3186,
+    "samples": 51
+  },
+  "cases": [
+    {
+      "adversarial": false,
+      "case_id": "auth-001",
+      "confidence": 0.95,
+      "correct": true,
+      "expected": "AUTHENTICATION_MATERIAL",
+      "predicted": "AUTHENTICATION_MATERIAL",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "auth-002",
+      "confidence": 0.95,
+      "correct": true,
+      "expected": "AUTHENTICATION_MATERIAL",
+      "predicted": "AUTHENTICATION_MATERIAL",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "auth-003",
+      "confidence": 0.95,
+      "correct": true,
+      "expected": "AUTHENTICATION_MATERIAL",
+      "predicted": "AUTHENTICATION_MATERIAL",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "auth-004",
+      "confidence": 0.95,
+      "correct": true,
+      "expected": "AUTHENTICATION_MATERIAL",
+      "predicted": "AUTHENTICATION_MATERIAL",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "auth-005",
+      "confidence": 0.95,
+      "correct": true,
+      "expected": "AUTHENTICATION_MATERIAL",
+      "predicted": "AUTHENTICATION_MATERIAL",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "auth-006",
+      "confidence": 0.95,
+      "correct": true,
+      "expected": "AUTHENTICATION_MATERIAL",
+      "predicted": "AUTHENTICATION_MATERIAL",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "cred-001",
+      "confidence": 0.85,
+      "correct": true,
+      "expected": "CREDENTIALS",
+      "predicted": "CREDENTIALS",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "cred-002",
+      "confidence": 0.85,
+      "correct": true,
+      "expected": "CREDENTIALS",
+      "predicted": "CREDENTIALS",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "cred-003",
+      "confidence": 0.85,
+      "correct": true,
+      "expected": "CREDENTIALS",
+      "predicted": "CREDENTIALS",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "cred-004",
+      "confidence": 0.85,
+      "correct": true,
+      "expected": "CREDENTIALS",
+      "predicted": "CREDENTIALS",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "cred-005",
+      "confidence": 0.85,
+      "correct": true,
+      "expected": "CREDENTIALS",
+      "predicted": "CREDENTIALS",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "cred-006",
+      "confidence": 0.85,
+      "correct": true,
+      "expected": "CREDENTIALS",
+      "predicted": "CREDENTIALS",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "sys-001",
+      "confidence": 0.8,
+      "correct": true,
+      "expected": "SYSTEM_SECURITY",
+      "predicted": "SYSTEM_SECURITY",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "sys-002",
+      "confidence": 0.8,
+      "correct": true,
+      "expected": "SYSTEM_SECURITY",
+      "predicted": "SYSTEM_SECURITY",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "sys-003",
+      "confidence": 0.8,
+      "correct": true,
+      "expected": "SYSTEM_SECURITY",
+      "predicted": "SYSTEM_SECURITY",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "sys-004",
+      "confidence": 0.8,
+      "correct": true,
+      "expected": "SYSTEM_SECURITY",
+      "predicted": "SYSTEM_SECURITY",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "fin-001",
+      "confidence": 0.75,
+      "correct": true,
+      "expected": "FINANCIAL_DATA",
+      "predicted": "FINANCIAL_DATA",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "fin-002",
+      "confidence": 0.75,
+      "correct": true,
+      "expected": "FINANCIAL_DATA",
+      "predicted": "FINANCIAL_DATA",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "fin-003",
+      "confidence": 0.75,
+      "correct": true,
+      "expected": "FINANCIAL_DATA",
+      "predicted": "FINANCIAL_DATA",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "fin-004",
+      "confidence": 0.75,
+      "correct": true,
+      "expected": "FINANCIAL_DATA",
+      "predicted": "FINANCIAL_DATA",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "fin-005",
+      "confidence": 0.75,
+      "correct": true,
+      "expected": "FINANCIAL_DATA",
+      "predicted": "FINANCIAL_DATA",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "pers-001",
+      "confidence": 0.75,
+      "correct": true,
+      "expected": "PERSONAL_DATA",
+      "predicted": "PERSONAL_DATA",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "pers-002",
+      "confidence": 0.75,
+      "correct": true,
+      "expected": "PERSONAL_DATA",
+      "predicted": "PERSONAL_DATA",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "pers-003",
+      "confidence": 0.75,
+      "correct": true,
+      "expected": "PERSONAL_DATA",
+      "predicted": "PERSONAL_DATA",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "pers-004",
+      "confidence": 0.75,
+      "correct": true,
+      "expected": "PERSONAL_DATA",
+      "predicted": "PERSONAL_DATA",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "pers-005",
+      "confidence": 0.75,
+      "correct": true,
+      "expected": "PERSONAL_DATA",
+      "predicted": "PERSONAL_DATA",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "pers-006",
+      "confidence": 0.75,
+      "correct": true,
+      "expected": "PERSONAL_DATA",
+      "predicted": "PERSONAL_DATA",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "code-001",
+      "confidence": 0.8,
+      "correct": true,
+      "expected": "SOURCE_CODE",
+      "predicted": "SOURCE_CODE",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "code-002",
+      "confidence": 0.8,
+      "correct": true,
+      "expected": "SOURCE_CODE",
+      "predicted": "SOURCE_CODE",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "code-003",
+      "confidence": 0.8,
+      "correct": true,
+      "expected": "SOURCE_CODE",
+      "predicted": "SOURCE_CODE",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "code-004",
+      "confidence": 0.8,
+      "correct": true,
+      "expected": "SOURCE_CODE",
+      "predicted": "SOURCE_CODE",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "code-005",
+      "confidence": 0.8,
+      "correct": true,
+      "expected": "SOURCE_CODE",
+      "predicted": "SOURCE_CODE",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "biz-001",
+      "confidence": 0.65,
+      "correct": true,
+      "expected": "CONFIDENTIAL_BUSINESS",
+      "predicted": "CONFIDENTIAL_BUSINESS",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "biz-002",
+      "confidence": 0.65,
+      "correct": true,
+      "expected": "CONFIDENTIAL_BUSINESS",
+      "predicted": "CONFIDENTIAL_BUSINESS",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "biz-003",
+      "confidence": 0.65,
+      "correct": true,
+      "expected": "CONFIDENTIAL_BUSINESS",
+      "predicted": "CONFIDENTIAL_BUSINESS",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "biz-004",
+      "confidence": 0.65,
+      "correct": true,
+      "expected": "CONFIDENTIAL_BUSINESS",
+      "predicted": "CONFIDENTIAL_BUSINESS",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "ord-001",
+      "confidence": 0.45,
+      "correct": true,
+      "expected": "ORDINARY",
+      "predicted": "ORDINARY",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "ord-002",
+      "confidence": 0.5,
+      "correct": true,
+      "expected": "ORDINARY",
+      "predicted": "ORDINARY",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "ord-003",
+      "confidence": 0.45,
+      "correct": true,
+      "expected": "ORDINARY",
+      "predicted": "ORDINARY",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "ord-004",
+      "confidence": 0.45,
+      "correct": true,
+      "expected": "ORDINARY",
+      "predicted": "ORDINARY",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "ord-005",
+      "confidence": 0.5,
+      "correct": true,
+      "expected": "ORDINARY",
+      "predicted": "ORDINARY",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": true,
+      "case_id": "adv-001",
+      "confidence": 0.2,
+      "correct": true,
+      "expected": "UNKNOWN",
+      "predicted": "UNKNOWN",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": true,
+      "case_id": "adv-002",
+      "confidence": 0.2,
+      "correct": true,
+      "expected": "UNKNOWN",
+      "predicted": "UNKNOWN",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": true,
+      "case_id": "adv-003",
+      "confidence": 0.2,
+      "correct": true,
+      "expected": "UNKNOWN",
+      "predicted": "UNKNOWN",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": true,
+      "case_id": "adv-004",
+      "confidence": 0.2,
+      "correct": true,
+      "expected": "UNKNOWN",
+      "predicted": "UNKNOWN",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": true,
+      "case_id": "adv-005",
+      "confidence": 0.45,
+      "correct": true,
+      "expected": "ORDINARY",
+      "predicted": "ORDINARY",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": true,
+      "case_id": "adv-006",
+      "confidence": 0.45,
+      "correct": true,
+      "expected": "ORDINARY",
+      "predicted": "ORDINARY",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": true,
+      "case_id": "adv-007",
+      "confidence": 0.45,
+      "correct": true,
+      "expected": "ORDINARY",
+      "predicted": "ORDINARY",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": true,
+      "case_id": "adv-008",
+      "confidence": 0.5,
+      "correct": true,
+      "expected": "ORDINARY",
+      "predicted": "ORDINARY",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": true,
+      "case_id": "adv-009",
+      "confidence": 0.45,
+      "correct": true,
+      "expected": "ORDINARY",
+      "predicted": "ORDINARY",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": true,
+      "case_id": "adv-010",
+      "confidence": 0.45,
+      "correct": true,
+      "expected": "ORDINARY",
+      "predicted": "ORDINARY",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "rec-001",
+      "confidence": 0.9,
+      "correct": true,
+      "expected": "ERASURE.LOGICAL.SELECTIVE.V1",
+      "predicted": "ERASURE.LOGICAL.SELECTIVE.V1",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "rec-002",
+      "confidence": 0.9,
+      "correct": true,
+      "expected": "ERASURE.LOGICAL.TREE.V1",
+      "predicted": "ERASURE.LOGICAL.TREE.V1",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": false,
+      "case_id": "rec-003",
+      "confidence": 0.9,
+      "correct": true,
+      "expected": "ERASURE.RECOVERABLE.ENCRYPTED.V1",
+      "predicted": "ERASURE.RECOVERABLE.ENCRYPTED.V1",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    },
+    {
+      "adversarial": true,
+      "case_id": "rec-004",
+      "confidence": 0.9,
+      "correct": true,
+      "expected": "ERASURE.LOGICAL.SELECTIVE.V1",
+      "predicted": "ERASURE.LOGICAL.SELECTIVE.V1",
+      "rejection_reasons": [],
+      "status": "AVAILABLE",
+      "unsafe_claims": []
+    }
+  ],
+  "caveats": [
+    "This dataset and the deterministic baseline rules were authored together, so a high baseline score measures agreement between two artefacts by the same author, not generalisation to filenames in the field. Treat the baseline's accuracy as a sanity check and an upper bound, never as evidence of real-world performance.",
+    "Every case is a filename. Nothing here measures whether a classifier can identify sensitive content hiding under an innocuous name, which is the failure mode with the highest real-world consequence and which no name-only method can address.",
+    "55 cases is small. Per-class figures for classes with four or five examples move substantially on a single error and should not be quoted as precise."
+  ],
+  "classification": {
+    "accuracy": 1.0,
+    "answered": 51,
+    "correct": 51,
+    "macro_f1": 1.0,
+    "macro_precision": 1.0,
+    "macro_recall": 1.0,
+    "per_class": [
+      {
+        "f1": 1.0,
+        "label": "AUTHENTICATION_MATERIAL",
+        "precision": 1.0,
+        "predicted": 6,
+        "recall": 1.0,
+        "support": 6,
+        "true_positives": 6
+      },
+      {
+        "f1": 1.0,
+        "label": "CONFIDENTIAL_BUSINESS",
+        "precision": 1.0,
+        "predicted": 4,
+        "recall": 1.0,
+        "support": 4,
+        "true_positives": 4
+      },
+      {
+        "f1": 1.0,
+        "label": "CREDENTIALS",
+        "precision": 1.0,
+        "predicted": 6,
+        "recall": 1.0,
+        "support": 6,
+        "true_positives": 6
+      },
+      {
+        "f1": 1.0,
+        "label": "FINANCIAL_DATA",
+        "precision": 1.0,
+        "predicted": 5,
+        "recall": 1.0,
+        "support": 5,
+        "true_positives": 5
+      },
+      {
+        "f1": 1.0,
+        "label": "ORDINARY",
+        "precision": 1.0,
+        "predicted": 11,
+        "recall": 1.0,
+        "support": 11,
+        "true_positives": 11
+      },
+      {
+        "f1": 1.0,
+        "label": "PERSONAL_DATA",
+        "precision": 1.0,
+        "predicted": 6,
+        "recall": 1.0,
+        "support": 6,
+        "true_positives": 6
+      },
+      {
+        "f1": 1.0,
+        "label": "SOURCE_CODE",
+        "precision": 1.0,
+        "predicted": 5,
+        "recall": 1.0,
+        "support": 5,
+        "true_positives": 5
+      },
+      {
+        "f1": 1.0,
+        "label": "SYSTEM_SECURITY",
+        "precision": 1.0,
+        "predicted": 4,
+        "recall": 1.0,
+        "support": 4,
+        "true_positives": 4
+      },
+      {
+        "f1": 1.0,
+        "label": "UNKNOWN",
+        "precision": 1.0,
+        "predicted": 4,
+        "recall": 1.0,
+        "support": 4,
+        "true_positives": 4
+      }
+    ],
+    "total": 51
+  },
+  "dataset": {
+    "adversarial_cases": 11,
+    "cases": 55,
+    "name": "sensitivity_v1",
+    "version": "1"
+  },
+  "decision": "FINE_TUNING_NOT_REQUIRED",
+  "decision_reasons": [
+    "Every measured criterion is within its threshold. Fine-tuning is not justified by this evaluation; the deterministic pipeline is unaffected either way."
+  ],
+  "generated_at": "2026-09-10T18:44:11.013472+00:00",
+  "model": {
+    "model_id": "baseline-heuristic",
+    "model_version": "heuristic-1",
+    "provider": "deterministic"
+  },
+  "safety": {
+    "abstention_rate": 0.0727,
+    "abstentions": 4,
+    "schema_rejection_rate": 0.0,
+    "schema_rejections": 0,
+    "total": 55,
+    "unavailable": 0,
+    "unsafe_claim_rate": 0.0,
+    "unsafe_claims": 0,
+    "unsafe_recommendation_rate": 0.0,
+    "unsafe_recommendations": 0
+  },
+  "thresholds": {
+    "max_overconfidence": 0.15,
+    "max_schema_rejection_rate": 0.1,
+    "max_unsafe_claim_rate": 0.0,
+    "max_unsafe_recommendation_rate": 0.05,
+    "min_macro_f1": 0.7
+  }
+}

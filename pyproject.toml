@@ -54,3 +54,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B017", "B023", "SIM", "ARG", "RET"]
 "__init__.py" = ["F401"]
+# Command-line scripts report to a terminal; printing is their interface, not a
+# stray debug statement. This was already the convention (gen_openapi.py) and is
+# now stated rather than left as an undeclared exception.
+"scripts/*" = ["T201"]
