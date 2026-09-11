@@ -142,13 +142,24 @@ const auth = () => {
   return captured
 }
 
+/**
+ * A session expiry that is always in the future.
+ *
+ * This was previously the literal `'2026-09-10T12:00:00Z'`, which made the suite a time bomb: the
+ * transport deliberately refuses to attach a credential it already knows is expired, so once that
+ * timestamp passed, the logout test began failing against a *correct* transport. The date, not the
+ * code, was wrong. Anchoring the fixture to the clock keeps the test asserting the property it
+ * means - a live credential is attached - rather than asserting what day it is.
+ */
+const FUTURE_EXPIRY = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+
 const loginHandler = {
   'POST /api/auth/login': () => ({
     status: 200,
     body: {
       access_token: OPAQUE_TOKEN,
       token_type: 'bearer',
-      expires_at: '2026-09-10T12:00:00Z',
+      expires_at: FUTURE_EXPIRY,
       user: REAL_PRINCIPAL,
     },
   }),
@@ -231,7 +242,27 @@ describe('session source seam', () => {
       username: 'real.operator',
       password: 'hunter2',
     })
-    expect(resolved.session.expiresAt).toBe('2026-09-10T12:00:00Z')
+    expect(resolved.session.expiresAt).toBe(FUTURE_EXPIRY)
+  })
+
+  it('does not attach a credential it already knows has expired', async () => {
+    // The complement of the test below, and the property that made the stale
+    // fixture look like a transport bug. Sending a dead token would turn a
+    // clear "no session" into a confusing 401 from the server.
+    const { calls } = stubBackend(loginHandler)
+    const { session } = await backendContractSessionSource.authenticate({
+      username: 'real.operator',
+      password: 'hunter2',
+    })
+    useAuthStore.getState().setSession({
+      ...session,
+      expiresAt: new Date(Date.now() - 1000).toISOString(),
+    })
+
+    await backendContractSessionSource.revoke()
+
+    const call = calls.find((c) => c.url.endsWith('/api/auth/logout'))
+    expect(call?.headers.Authorization).toBeUndefined()
   })
 
   it('revoke posts to the logout endpoint with the bearer credential attached', async () => {

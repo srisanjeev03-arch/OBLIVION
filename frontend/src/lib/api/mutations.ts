@@ -8,7 +8,11 @@ import {
   unavailableReason,
   type CapabilityId,
 } from './capabilities'
-import { queryKeys, type CertificateVerificationOut } from './queries'
+import {
+  queryKeys,
+  type AuditChainVerificationOut,
+  type CertificateVerificationOut,
+} from './queries'
 import type {
   CreateOperationRequest,
   Operation,
@@ -93,6 +97,29 @@ export function useVerifyCertificateMutation(certificateId: string) {
     retry: false,
     onSuccess: (result) => {
       qc.setQueryData(queryKeys.certificateVerification(certificateId), result)
+    },
+  })
+}
+
+/**
+ * POST /api/audit/verify - the server re-hashes every persisted audit record and answers.
+ *
+ * The console performs no verification of its own and sends no body: there is no field in this
+ * request in which a client could assert that the chain is intact, which is exactly what keeps the
+ * verdict the server's. The result carries `does_not_prove` and `scope_note`, and the UI renders
+ * them, because an intact audit log is not a claim about erasure, evidence or certificate trust.
+ */
+export function useVerifyAuditChainMutation() {
+  const qc = useQueryClient()
+  return useMutation<AuditChainVerificationOut, ApiError, void>({
+    mutationFn: () =>
+      gatedMutation<undefined, AuditChainVerificationOut>('audit.verify')(undefined),
+    retry: false,
+    onSuccess: (result) => {
+      qc.setQueryData(queryKeys.auditVerification(), result)
+      // Verifying is itself an audited act, so the log the operator is looking at
+      // is now one record out of date.
+      void qc.invalidateQueries({ queryKey: ['oblivion', 'audit', 'events'] })
     },
   })
 }

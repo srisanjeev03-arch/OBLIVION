@@ -53,10 +53,13 @@ describe('availability is derived, not asserted', () => {
 })
 
 describe('gaps are named, not hidden', () => {
+  // `audit.events` used to be listed here. The backend now publishes
+  // `GET /api/audit/events` and `POST /api/audit/verify`, so the gap is closed
+  // and the capability is contracted like any other - keeping it in this list
+  // would assert a limitation that no longer exists.
   const GAPPED: CapabilityId[] = [
     'operations.list',
     'targets.list',
-    'audit.events',
     'assurance.get',
     'certificates.list',
     'residual.findings',
@@ -113,9 +116,18 @@ describe('registry integrity', () => {
   })
 
   it('flags exactly the destructive operations for confirmation handling', () => {
+    // `operations.pipeline` runs the real erasure as one of its twelve stages,
+    // so it must be flagged destructive and carry the same confirmation
+    // handling as `operations.execute`. A destructive call the console treats
+    // as ordinary is the one that gets fired by accident.
     const destructive = ALL_IDS.filter((id) => CAPABILITIES[id].destructive)
     expect(destructive.sort()).toEqual(
-      ['operations.create', 'operations.execute', 'recovery.restore'].sort(),
+      [
+        'operations.create',
+        'operations.execute',
+        'operations.pipeline',
+        'recovery.restore',
+      ].sort(),
     )
   })
 })

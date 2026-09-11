@@ -33,17 +33,19 @@ export type CapabilityId =
   | 'operations.execute'
   | 'operations.cancel'
   | 'operations.events'
+  | 'operations.pipeline'
   | 'recovery.list'
   | 'recovery.restore'
   | 'certificates.get'
   | 'certificates.verify'
   | 'evidence.verify'
+  | 'audit.events'
+  | 'audit.verify'
   | 'health'
   // Absent from the contract. Each is kept here so the screen that would use it can name the gap
   // precisely instead of rendering an empty success state.
   | 'operations.list'
   | 'targets.list'
-  | 'audit.events'
   | 'assurance.get'
   | 'certificates.list'
   | 'residual.findings'
@@ -141,6 +143,15 @@ export const CAPABILITIES: Readonly<Record<CapabilityId, Capability>> = {
     destructive: false,
     summary: 'Evidence events for an operation.',
   },
+  'operations.pipeline': {
+    id: 'operations.pipeline',
+    method: 'POST',
+    path: '/api/operations/{operation_id}/pipeline',
+    destructive: true,
+    summary:
+      'Run the full closed loop for an approved operation: erase, re-observe, test recovery, ' +
+      'scan residuals, assess assurance, issue and verify a certificate.',
+  },
   'recovery.list': {
     id: 'recovery.list',
     method: 'GET',
@@ -176,6 +187,24 @@ export const CAPABILITIES: Readonly<Record<CapabilityId, Capability>> = {
     destructive: false,
     summary: 'Verify a raw evidence package signature against an Ed25519 public key.',
   },
+  'audit.events': {
+    id: 'audit.events',
+    method: 'GET',
+    path: '/api/audit/events',
+    destructive: false,
+    summary:
+      'Read the append-only audit log, oldest first. Requires audit.view, held by ADMIN and ' +
+      'AUDITOR only.',
+  },
+  'audit.verify': {
+    id: 'audit.verify',
+    method: 'POST',
+    path: '/api/audit/verify',
+    destructive: false,
+    summary:
+      'Verify the audit chain server-side. Reports audit-log integrity only - never evidence ' +
+      'integrity, erasure success or certificate trust.',
+  },
   health: {
     id: 'health',
     method: 'GET',
@@ -202,16 +231,6 @@ export const CAPABILITIES: Readonly<Record<CapabilityId, Capability>> = {
     summary: 'List analyzed targets.',
     gapNote:
       'No target collection route is published; targets are addressed by ID after analysis.',
-  },
-  'audit.events': {
-    id: 'audit.events',
-    method: 'GET',
-    path: '/api/audit/events',
-    destructive: false,
-    summary: 'Audit timeline.',
-    gapNote:
-      'Audit events are persisted by the backend but no read endpoint is published, so the audit ' +
-      'timeline cannot be displayed. Per-operation evidence events are available instead.',
   },
   'assurance.get': {
     id: 'assurance.get',

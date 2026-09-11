@@ -43,6 +43,23 @@ class TestAnalyzeTargetEndpoint:
         assert resp.status_code == 200
         assert resp.json()["canonical_path"]
 
+    def test_analyze_reports_the_real_size(self, client, temp_dir):
+        """A target's reported size must be the file's actual size.
+
+        The route previously read ``result["size_bytes"]``, a key the analyzer
+        only publishes inside ``metadata`` - so every analyzed target came back
+        as 0 bytes and was persisted with ``total_size=0``. An operator seeing
+        "0 bytes" for the file they are about to erase is being shown a fact the
+        system never measured.
+        """
+        payload = "x" * 4096
+        f = temp_dir / "sized.bin"
+        f.write_text(payload)
+
+        resp = client.post("/api/targets/analyze", json={"path": str(f)})
+        assert resp.status_code == 200
+        assert resp.json()["size_bytes"] == len(payload)
+
     def test_analyze_target_outside_allowed_root_when_authenticated(self, client):
         resp = client.post("/api/targets/analyze", json={"path": "/etc/passwd"})
         assert resp.status_code in (400, 422)

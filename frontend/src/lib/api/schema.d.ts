@@ -228,6 +228,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operations/{operation_id}/pipeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Pipeline
+         * @description Run an approved operation through the full closed loop.
+         *
+         *     Requires ``operation.execute``. Holding that permission is necessary but not
+         *     sufficient: the pipeline's own AUTHORIZE stage additionally requires a
+         *     durable approval recorded by someone other than the requester, so a single
+         *     actor cannot both request and run a destructive operation.
+         *
+         *     A 200 does not mean the target was erased. It means the pipeline ran and
+         *     reported what happened - which may be a refusal. Read ``final_state`` and the
+         *     per-stage statuses.
+         */
+        post: operations["run_pipeline_api_operations__operation_id__pipeline_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/recovery-objects": {
         parameters: {
             query?: never;
@@ -279,7 +308,9 @@ export interface paths {
         };
         /**
          * Get Certificate
-         * @description Retrieve an issued certificate (requires evidence.view permission, no private key exposure).
+         * @description Retrieve an issued certificate (requires evidence.view).
+         *
+         *     Returns the signer's public key only; no private key exists in this API.
          */
         get: operations["get_certificate_api_certificates__certificate_id__get"];
         put?: never;
@@ -301,9 +332,14 @@ export interface paths {
         put?: never;
         /**
          * Verify Certificate Endpoint
-         * @description Verify certificate authenticity, evidence hash, and Ed25519 signature.
-         *     Requires evidence.verify permission.
-         *     Reports dimension-level results for explicit security status.
+         * @description Verify a certificate across ten independent dimensions.
+         *
+         *     The caller may supply the operation and target it *expects* this certificate
+         *     to attest to. It cannot supply the outcome: signer trust comes from the
+         *     server's TrustStore, and evidence integrity is recomputed from the stored
+         *     evidence. A request that supplies no expectations gets ``INCONCLUSIVE``,
+         *     which is the truthful answer when nothing independent was available to check
+         *     against.
          */
         post: operations["verify_certificate_endpoint_api_certificates__certificate_id__verify_post"];
         delete?: never;
@@ -332,6 +368,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/audit/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Audit Events
+         * @description Read audit records, oldest first (requires ``audit.view``).
+         *
+         *     Unrecognised filter values are rejected with 422 rather than ignored. A
+         *     filter that is silently dropped returns *more* than was asked for while
+         *     looking like it returned exactly what was asked for - in an audit context,
+         *     a way to miss the record you were told to find.
+         */
+        get: operations["list_audit_events_api_audit_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/audit/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Audit Chain Endpoint
+         * @description Verify the persisted audit chain (requires ``audit.verify``).
+         *
+         *     Records are loaded from storage and rehashed. The caller supplies no
+         *     digests, no records and no expected outcome - there is no field in this
+         *     request in which to assert that the log is intact, which is what keeps the
+         *     answer the server's rather than the caller's.
+         */
+        post: operations["verify_audit_chain_endpoint_api_audit_verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -353,14 +439,162 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AssuranceStatusOut
+         * @enum {string}
+         */
+        AssuranceStatusOut: "PASSED" | "PARTIAL" | "INCONCLUSIVE" | "FAILED";
+        /**
+         * AuditChainVerificationOut
+         * @description The result of verifying the persisted audit chain.
+         */
+        AuditChainVerificationOut: {
+            /** Status */
+            status: string;
+            /** Checked */
+            checked: number;
+            /** Reason */
+            reason: string;
+            /** Links */
+            links: components["schemas"]["AuditLinkOut"][];
+            /** First Invalid Audit Id */
+            first_invalid_audit_id?: string | null;
+            /**
+             * Records Predating Chain
+             * @default 0
+             */
+            records_predating_chain: number;
+            /** Proves */
+            proves: string[];
+            /** Does Not Prove */
+            does_not_prove: string[];
+            /**
+             * Scope Note
+             * @default This result describes the integrity of the audit log only. It is not a statement about evidence integrity, erasure success, or certificate trust, each of which is verified separately against its own artefact.
+             */
+            scope_note: string;
+        };
+        /**
+         * AuditEventOut
+         * @description One audit record as published.
+         */
+        AuditEventOut: {
+            /** Audit Id */
+            audit_id: string;
+            /** Sequence */
+            sequence: number;
+            /** Event Type */
+            event_type: string;
+            /** Outcome */
+            outcome: string;
+            /** Actor Id */
+            actor_id: string;
+            /** Actor Role */
+            actor_role: string;
+            /** Actor Source */
+            actor_source: string;
+            /** Operation Id */
+            operation_id?: string | null;
+            /** Target Identity */
+            target_identity?: string | null;
+            /** Evidence Id */
+            evidence_id?: string | null;
+            /** Certificate Id */
+            certificate_id?: string | null;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /** Safe Metadata */
+            safe_metadata?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Digest */
+            digest: string;
+            /** Previous Audit Id */
+            previous_audit_id?: string | null;
+            /** Previous Audit Digest */
+            previous_audit_digest?: string | null;
+        };
+        /**
+         * AuditEventPageOut
+         * @description A page of audit records, oldest first.
+         *
+         *     ``total_records`` is the height of the whole log, not the size of this
+         *     page, so a reader can tell a page is a window without inferring it from the
+         *     page happening to be full.
+         */
+        AuditEventPageOut: {
+            /** Events */
+            events: components["schemas"]["AuditEventOut"][];
+            /** Returned */
+            returned: number;
+            /** Total Records */
+            total_records: number;
+            /**
+             * Records Predating Chain
+             * @default 0
+             */
+            records_predating_chain: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /** AuditLinkOut */
+        AuditLinkOut: {
+            /** Audit Id */
+            audit_id: string;
+            /** Sequence */
+            sequence: number;
+            /** Status */
+            status: string;
+            /** Detail */
+            detail: string;
+        };
+        /**
+         * AuditVerifyRequest
+         * @description Optional narrowing for a verification request.
+         *
+         *     Supplying ``operation_id`` narrows which records are examined. It cannot
+         *     make a window look complete: a subset that does not begin at the genesis
+         *     record is reported ``UNVERIFIABLE``, because the chain spans every event in
+         *     the system and a per-operation slice necessarily has history before it.
+         */
+        AuditVerifyRequest: {
+            /** Operation Id */
+            operation_id?: string | null;
+        };
         /** CertificateOut */
         CertificateOut: {
             /** Id */
             id: string;
             /** Operation Id */
             operation_id: string;
+            /** Evidence Id */
+            evidence_id?: string | null;
             /** Evidence Digest */
             evidence_digest: string;
+            /** Certificate Version */
+            certificate_version: string;
+            /** Canonicalization Version */
+            canonicalization_version?: string | null;
+            /** Evidence Schema Version */
+            evidence_schema_version?: string | null;
+            /** Target Identity */
+            target_identity?: string | null;
+            /** Method */
+            method?: string | null;
+            /** Result */
+            result?: string | null;
+            /** Signer Id */
+            signer_id?: string | null;
             /** Signing Algorithm */
             signing_algorithm: string;
             /** Key Id */
@@ -391,14 +625,43 @@ export interface components {
              * @description Exactly one result per verification dimension. A PASS on SIGNATURE_VALIDITY does not imply overall certificate validity: only overall_status does. NOT_CHECKED and INCONCLUSIVE are honest absences of evidence and must not be rendered as success.
              */
             dimensions: components["schemas"]["DimensionResultOut"][];
+            /** Cannot Prove */
+            cannot_prove?: string[];
+            /** Certificate Version */
+            certificate_version?: string | null;
+            /** Verifier Version */
+            verifier_version: string;
+            /**
+             * Verified At
+             * Format: date-time
+             */
+            verified_at: string;
             /** Signature Valid */
             signature_valid?: boolean | null;
             /** Evidence Integrity */
             evidence_integrity?: boolean | null;
             /** Signer Trusted */
             signer_trusted?: boolean | null;
-            /** Cannot Prove */
-            cannot_prove?: string[];
+        };
+        /**
+         * CertificateVerificationRequest
+         * @description Independent expectations the caller brings to the verification.
+         *
+         *     Both are optional. Omitting one is honest - the corresponding dimension
+         *     reports ``NOT_CHECKED`` and the overall result becomes ``INCONCLUSIVE``
+         *     rather than pretending the check succeeded.
+         */
+        CertificateVerificationRequest: {
+            /**
+             * Expected Operation Id
+             * @description The operation the caller believes this certificate attests to. Compared against the certificate and its evidence.
+             */
+            expected_operation_id?: string | null;
+            /**
+             * Expected Target Identity
+             * @description The target the caller believes this certificate attests to. Compared against the certificate and its evidence.
+             */
+            expected_target_identity?: string | null;
         };
         /** ConfirmationInput */
         ConfirmationInput: {
@@ -408,6 +671,31 @@ export interface components {
              */
             acknowledged_risk: boolean;
         };
+        /**
+         * CoverageOut
+         * @description What was actually searched.
+         *
+         *     Present so no client ever has to infer coverage from an empty findings list
+         *     or a single boolean.
+         */
+        CoverageOut: {
+            /** @default NOT_PERFORMED */
+            residual_analysis: components["schemas"]["CoverageState"];
+            /** @default NOT_PERFORMED */
+            recovery_test: components["schemas"]["CoverageState"];
+            recovery_methods?: components["schemas"]["RecoveryMethodCoverageOut"];
+            residual_scanners?: components["schemas"]["ResidualScannerCoverageOut"];
+        };
+        /**
+         * CoverageState
+         * @description How much of a supported analysis actually ran.
+         *
+         *     The distinction between `PARTIAL` and `PERFORMED` is the point: before it
+         *     existed, "one of several recovery methods ran" and "every supported method
+         *     ran" were reported identically, and a client could not tell them apart.
+         * @enum {string}
+         */
+        CoverageState: "NOT_PERFORMED" | "UNAVAILABLE" | "INCONCLUSIVE" | "PARTIAL" | "PERFORMED";
         /** CreateOperationRequest */
         CreateOperationRequest: {
             /** Target Id */
@@ -529,7 +817,7 @@ export interface components {
             mode: string;
             /**
              * State
-             * @description Operation lifecycle state. Authoritative values: CREATED, ANALYZING, PENDING_APPROVAL, READY, ERASING, VERIFYING, RECOVERY_TEST, RESIDUAL_SCAN, RESIDUAL_ANALYSIS, ASSESSING, CERTIFYING, COMPLETED, PARTIAL, FAILED, INCONCLUSIVE, CANCELLED. Terminal states: COMPLETED, PARTIAL, FAILED, INCONCLUSIVE, CANCELLED. Consumers must render PARTIAL and INCONCLUSIVE as distinct outcomes and must never collapse them into success.
+             * @description Operation lifecycle state. Authoritative values: CREATED, ANALYZING, PENDING_APPROVAL, READY, ERASING, VERIFYING, RECOVERY_TEST, RESIDUAL_SCAN, RESIDUAL_ANALYSIS, ASSESSING, CERTIFYING, RECONCILIATION_REQUIRED, COMPLETED, PARTIAL, FAILED, INCONCLUSIVE, CANCELLED. Terminal states: COMPLETED, PARTIAL, FAILED, INCONCLUSIVE, CANCELLED. Consumers must render PARTIAL and INCONCLUSIVE as distinct outcomes and must never collapse them into success.
              */
             state: string;
             /** Policy Id */
@@ -557,6 +845,78 @@ export interface components {
             /** Completed At */
             completed_at?: string | null;
         };
+        /**
+         * OperationStateOut
+         * @description Terminal states an operation can end the pipeline in.
+         * @enum {string}
+         */
+        OperationStateOut: "COMPLETED" | "PARTIAL" | "FAILED" | "INCONCLUSIVE" | "CANCELLED";
+        /**
+         * PipelineResultOut
+         * @description The whole run.
+         *
+         *     ``certificate_id`` is null whenever issuance was refused or unavailable, and
+         *     the corresponding stage says why. A null certificate is a normal, meaningful
+         *     outcome - it means nothing certifiable was established - and callers must not
+         *     treat it as an error.
+         */
+        PipelineResultOut: {
+            /** Operation Id */
+            operation_id: string;
+            /** Target Identity */
+            target_identity: string;
+            final_state: components["schemas"]["OperationStateOut"];
+            /** Stages */
+            stages: components["schemas"]["PipelineStageOut"][];
+            /** Evidence Id */
+            evidence_id?: string | null;
+            /** Evidence Digest */
+            evidence_digest?: string | null;
+            /** Certificate Id */
+            certificate_id?: string | null;
+            assurance_status?: components["schemas"]["AssuranceStatusOut"] | null;
+            verification_status?: components["schemas"]["VerificationStatusOut"] | null;
+            /** @description What was actually searched. Read this alongside `assurance_status`: PASSED with PARTIAL recovery coverage means no artifacts were found by the methods that ran, not that every method was tried. */
+            coverage?: components["schemas"]["CoverageOut"];
+            /**
+             * Limitations
+             * @description What this operation did not establish, including recovery methods that were never attempted and sanitization that was never performed.
+             */
+            limitations?: string[];
+            /**
+             * Privilege Isolated
+             * @default false
+             */
+            privilege_isolated: boolean;
+        };
+        /**
+         * PipelineStage
+         * @description The closed loop, in order. Mirrors ``core.pipeline.Stage``.
+         * @enum {string}
+         */
+        PipelineStage: "DISCOVER" | "BASELINE" | "RECOMMEND" | "AUTHORIZE" | "ERASE" | "VALIDATE" | "TEST_RECOVERY" | "ANALYZE_RESIDUALS" | "ASSESS_ASSURANCE" | "GENERATE_EVIDENCE" | "ISSUE_CERTIFICATE" | "VERIFY_CERTIFICATE";
+        /**
+         * PipelineStageOut
+         * @description One stage, and what it established.
+         */
+        PipelineStageOut: {
+            stage: components["schemas"]["PipelineStage"];
+            status: components["schemas"]["PipelineStageStatus"];
+            /**
+             * Detail
+             * @description Why the stage ended as it did. Human-readable; never the only machine-readable signal - use `status`.
+             */
+            detail: string;
+        };
+        /**
+         * PipelineStageStatus
+         * @description How a stage ended.
+         *
+         *     ``SKIPPED`` and ``UNAVAILABLE`` are distinct on the wire for the same reason
+         *     they are distinct internally: chosen not to run, versus tried and could not.
+         * @enum {string}
+         */
+        PipelineStageStatus: "COMPLETED" | "REFUSED" | "FAILED" | "UNAVAILABLE" | "SKIPPED";
         /** RecoveryConfig */
         RecoveryConfig: {
             /**
@@ -564,6 +924,37 @@ export interface components {
              * @default 86400
              */
             retention_seconds: number | null;
+        };
+        /**
+         * RecoveryMethodCoverageOut
+         * @description Which recovery methods ran, and what each one did.
+         *
+         *     Named lists rather than counts, so a client can render exactly which
+         *     techniques were and were not applied instead of inferring it.
+         */
+        RecoveryMethodCoverageOut: {
+            /**
+             * Supported
+             * @description Methods this build can perform at all.
+             */
+            supported?: string[];
+            /** Attempted */
+            attempted?: string[];
+            /**
+             * Successful
+             * @description Methods that recovered the data. Non-empty means recoverable.
+             */
+            successful?: string[];
+            /**
+             * Failed
+             * @description Methods that ran and did not recover the data. Evidence about those methods only - never evidence of irrecoverability.
+             */
+            failed?: string[];
+            /**
+             * Unavailable
+             * @description Methods never attempted, because this build cannot perform them.
+             */
+            unavailable?: string[];
         };
         /** RecoveryObjectOut */
         RecoveryObjectOut: {
@@ -584,6 +975,20 @@ export interface components {
             created_at?: string | null;
             /** Expires At */
             expires_at?: string | null;
+        };
+        /**
+         * ResidualScannerCoverageOut
+         * @description Which residual scanners ran.
+         */
+        ResidualScannerCoverageOut: {
+            /** Supported */
+            supported?: string[];
+            /** Ran */
+            ran?: string[];
+            /** Inconclusive */
+            inconclusive?: string[];
+            /** Unavailable */
+            unavailable?: string[];
         };
         /** RestoreRequest */
         RestoreRequest: {
@@ -716,6 +1121,11 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /**
+         * VerificationStatusOut
+         * @enum {string}
+         */
+        VerificationStatusOut: "VALID" | "INVALID" | "INCONCLUSIVE" | "ERROR";
     };
     responses: never;
     parameters: never;
@@ -1088,6 +1498,39 @@ export interface operations {
             };
         };
     };
+    run_pipeline_api_operations__operation_id__pipeline_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResultOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_recovery_objects_api_recovery_objects_get: {
         parameters: {
             query?: never;
@@ -1200,7 +1643,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CertificateVerificationRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -1244,6 +1691,81 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EvidenceVerificationResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_audit_events_api_audit_events_get: {
+        parameters: {
+            query?: {
+                operation_id?: string | null;
+                actor_id?: string | null;
+                event_type?: string | null;
+                outcome?: string | null;
+                since?: string | null;
+                until?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditEventPageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_audit_chain_endpoint_api_audit_verify_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AuditVerifyRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditChainVerificationOut"];
                 };
             };
             /** @description Validation Error */

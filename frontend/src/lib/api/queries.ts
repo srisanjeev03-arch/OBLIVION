@@ -25,6 +25,34 @@ export type VerificationDimension = DimensionResultOut['dimension']
 export type DimensionResult = DimensionResultOut['result']
 export type OverallStatus = CertificateVerificationOut['overall_status']
 
+/**
+ * Audit types come from the generated contract too, for the same reason the certificate ones do:
+ * the chain vocabulary is only worth rendering if it is the backend's own, not a restatement that
+ * can drift from it.
+ */
+export type AuditEventOut = components['schemas']['AuditEventOut']
+export type AuditEventPageOut = components['schemas']['AuditEventPageOut']
+export type AuditChainVerificationOut = components['schemas']['AuditChainVerificationOut']
+export type AuditLinkOut = components['schemas']['AuditLinkOut']
+
+/** Per-record link states, in escalating order of concern. */
+export const AUDIT_LINK_STATUSES = [
+  'VALID_GENESIS',
+  'VALID_PREDECESSOR',
+  'MISSING_PREDECESSOR',
+  'BROKEN_PREDECESSOR',
+  'MUTATED_EVENT',
+] as const
+
+export interface AuditEventFilters {
+  operation_id?: string
+  actor_id?: string
+  event_type?: string
+  outcome?: string
+  limit?: number
+  offset?: number
+}
+
 /** The ten verification dimensions, in the order the backend enumerates them. */
 export const VERIFICATION_DIMENSIONS: readonly VerificationDimension[] = [
   'STRUCTURE',
@@ -49,6 +77,8 @@ export const queryKeys = {
   certificate: (id: string) => ['oblivion', 'certificate', id] as const,
   certificateVerification: (id: string) =>
     ['oblivion', 'certificate', id, 'verification'] as const,
+  auditEvents: (filters: AuditEventFilters) => ['oblivion', 'audit', 'events', filters] as const,
+  auditVerification: () => ['oblivion', 'audit', 'verification'] as const,
 }
 
 /**
@@ -124,6 +154,30 @@ export function useCertificateQuery(certificateId: string | undefined) {
       buildPath('certificates.get', { certificate_id: certificateId ?? '' }),
     ),
     enabled: !!certificateId && isAvailable('certificates.get'),
+  })
+}
+
+/**
+ * Read the append-only audit log.
+ *
+ * Requires `audit.view`, which only ADMIN and AUDITOR hold. A caller without it gets a 403, which
+ * `toScreenState` renders as BLOCKED - a refusal the operator can see and act on, rather than an
+ * empty table that would read as "no events happened".
+ */
+export function useAuditEventsQuery(filters: AuditEventFilters = {}) {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== '') query.set(key, String(value))
+  }
+  const suffix = query.toString()
+
+  return useQuery<AuditEventPageOut, ApiError>({
+    queryKey: queryKeys.auditEvents(filters),
+    queryFn: gatedFetcher<AuditEventPageOut>(
+      'audit.events',
+      `${buildPath('audit.events')}${suffix ? `?${suffix}` : ''}`,
+    ),
+    enabled: isAvailable('audit.events'),
   })
 }
 

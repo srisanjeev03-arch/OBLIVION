@@ -56,7 +56,12 @@ async def analyze_target(
     target_id = result.get("id", f"tgt_{uuid.uuid4().hex[:12]}")
     canonical = result.get("canonical_path", request.path)
     target_type = result.get("type", "unknown")
-    size_bytes = result.get("size_bytes", 0)
+    # The analyzer publishes the total under "size"; "size_bytes" exists only
+    # inside `metadata`. Reading the wrong key here meant every analyzed target
+    # was reported to the client as 0 bytes and persisted with total_size=0 -
+    # an operator seeing "0 bytes" for the file they are about to erase. Both
+    # spellings are accepted so the route survives either producer.
+    size_bytes = result.get("size", result.get("size_bytes", 0)) or 0
     file_count = result.get("file_count", 0)
     sha256 = result.get("sha256")
 

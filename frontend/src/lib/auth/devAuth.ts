@@ -9,10 +9,19 @@ import { ApiError } from '@/lib/api/errors'
  *
  * SAFETY PROPERTIES (all enforced, none configurable):
  *   1. Gated exclusively on `import.meta.env.DEV` (or the vitest MODE). Vite statically replaces
- *      `import.meta.env.DEV` with `false` in production builds, so every branch below is
- *      dead-code-eliminated from the shipped bundle. There is deliberately NO `VITE_MOCK_AUTH`
- *      escape hatch: a build-time env var can be set by whoever controls the build environment,
- *      which would turn a "development only" door into a production backdoor.
+ *      both, so in a production build `isDevAuthEnabled()` compiles to `return false` and
+ *      `assertDevAuthEnabled()` throws unconditionally - every persona path is unreachable.
+ *      Verified by inspecting the built bundle, not assumed. There is deliberately NO
+ *      `VITE_MOCK_AUTH` escape hatch: a build-time env var can be set by whoever controls the
+ *      build environment, which would turn a "development only" door into a production backdoor.
+ *
+ *      What is *not* true, and was previously claimed here: the module is not
+ *      dead-code-eliminated. `lib/auth/index.ts` re-exports it with `export * from './devAuth'`,
+ *      so the bundler cannot prove `DEV_PERSONAS` unused, and the persona array and banner string
+ *      ship as unreachable constants. That is wasted payload and a misleading thing to find in a
+ *      forensic product's bundle, but it is not a privilege path: the only functions that read
+ *      those constants throw before returning. Removing the data would mean changing how the auth
+ *      barrel exports, a structural change this milestone deliberately did not make.
  *   2. Personas are reachable ONLY through `signInWithDevPersona()` — an explicit action on a
  *      labelled control. `login()` never routes here, so a failed real authentication request can
  *      never silently become a fake authenticated session.

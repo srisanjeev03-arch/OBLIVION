@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from oblivion.api.dependencies import (
     get_db,
+    resolve_audit_actor,
     get_privileged_client,
     get_safe_validator,
     get_signing_key_manager,
@@ -36,6 +37,7 @@ from oblivion.api.schemas.pipeline import (
     VerificationStatusOut,
 )
 from oblivion.certificate.keys import SigningKeyManager
+from oblivion.core.audit import AuditEventType, AuditLog, AuditOutcome
 from oblivion.certificate.trust_model import TrustStore
 from oblivion.core.pipeline import ClosedLoopPipeline, PipelineRequest
 from oblivion.core.safety.paths import SafePathValidator
@@ -125,6 +127,29 @@ async def run_pipeline(
         trust_store=trust_store,
     )
 
+    audit = AuditLog(db)
+    actor = resolve_audit_actor(current_user, db)
+
+    # Recorded before anything destructive happens, and committed with the rest
+    # of the request. If the process dies mid-pipeline, the log still shows that
+    # this actor began an erasure against this target - which is exactly the
+    # case where the record matters most.
+    audit.append(
+        AuditEventType.PIPELINE_STARTED,
+        AuditOutcome.SUCCEEDED,
+        actor,
+        operation_id=operation.id,
+        target_identity=target.canonical_path,
+        summary="Began the closed-loop pipeline.",
+        safe_metadata={
+            "mode": operation.mode,
+            "policy_id": operation.policy_id or "",
+            "requested_by": operation.requested_by,
+            "approved_by": operation.approved_by,
+            "executed_by": current_user.id,
+        },
+    )
+
     result = pipeline.run(
         PipelineRequest(
             operation_id=operation.id,
@@ -136,6 +161,72 @@ async def run_pipeline(
             actor_id=current_user.id,
         )
     )
+
+    # The erase stage's own verdict, recorded as the engine gave it. A COMPLETED
+    # here means the erase stage reported success and the post-state was
+    # re-observed; it is not an assurance claim, and the assurance verdict is
+    # recorded separately below precisely so the two cannot be conflated.
+    erase_status = next(
+        (str(stage.status) for stage in result.stages if str(stage.stage) == "ERASE"),
+        "NOT_RUN",
+    )
+    audit.append(
+        AuditEventType.OPERATION_EXECUTED,
+        AuditOutcome.SUCCEEDED if erase_status == "COMPLETED" else AuditOutcome.FAILED,
+        actor,
+        operation_id=operation.id,
+        target_identity=target.canonical_path,
+        evidence_id=result.evidence_id,
+        summary=f"Erase stage reported {erase_status}.",
+        safe_metadata={
+            "erase_status": erase_status,
+            "final_state": str(result.final_state),
+        },
+    )
+
+    if result.evidence_id:
+        audit.append(
+            AuditEventType.EVIDENCE_RECORDED,
+            AuditOutcome.SUCCEEDED,
+            actor,
+            operation_id=operation.id,
+            evidence_id=result.evidence_id,
+            summary="Persisted the evidence record for this operation.",
+        )
+
+    if result.certificate_id:
+        audit.append(
+            AuditEventType.CERTIFICATE_ISSUED,
+            AuditOutcome.SUCCEEDED,
+            actor,
+            operation_id=operation.id,
+            evidence_id=result.evidence_id,
+            certificate_id=result.certificate_id,
+            summary="Issued a signed certificate for this operation.",
+        )
+
+    # The conclusion, with the assurance verdict kept in its own field rather
+    # than folded into the outcome. INCONCLUSIVE and PARTIAL are real answers,
+    # and an audit record that rendered them as failure would misreport them.
+    audit.append(
+        AuditEventType.PIPELINE_CONCLUDED,
+        AuditOutcome.SUCCEEDED,
+        actor,
+        operation_id=operation.id,
+        target_identity=result.target_identity,
+        evidence_id=result.evidence_id,
+        certificate_id=result.certificate_id,
+        summary=f"Pipeline concluded in {result.final_state}.",
+        safe_metadata={
+            "final_state": str(result.final_state),
+            # Kept as separate named fields. "The pipeline finished" and "the
+            # assurance engine reached a positive verdict" are different facts,
+            # and INCONCLUSIVE is a real answer rather than a failure.
+            "assurance_status": result.assurance_status,
+            "verification_status": result.verification_status,
+        },
+    )
+
     db.commit()
 
     # Converted explicitly rather than relying on Pydantic to coerce the
