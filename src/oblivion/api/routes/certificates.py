@@ -11,7 +11,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from oblivion.api.dependencies import get_db, get_trust_store, require_permission
+from oblivion.api.dependencies import (
+    get_db,
+    get_trust_store,
+    require_permission,
+    resolve_audit_actor,
+)
 from oblivion.api.schemas.certificate import (
     CertificateOut,
     CertificateVerificationOut,
@@ -19,6 +24,7 @@ from oblivion.api.schemas.certificate import (
     DimensionResultOut,
 )
 from oblivion.certificate.trust_model import TrustStore
+from oblivion.core.audit import AuditEventType, AuditLog, AuditOutcome
 from oblivion.certificate.verification import VerificationContext, verify_certificate
 from oblivion.persistence.models.user import UserModel
 from oblivion.persistence.repositories.certificate_repo import CertificateRepository
@@ -108,6 +114,27 @@ async def verify_certificate_endpoint(
     )
 
     result = verify_certificate(certificate, context)
+
+    # Who asked, which certificate, and what the server answered. The outcome
+    # records that the *verification ran*, not that the certificate was valid -
+    # the verdict itself is `overall_status` in the metadata. Collapsing the two
+    # would make a routine INVALID look like a failed request.
+    AuditLog(db).append(
+        AuditEventType.CERTIFICATE_VERIFIED,
+        AuditOutcome.SUCCEEDED,
+        resolve_audit_actor(current_user, db),
+        operation_id=certificate.operation_id,
+        certificate_id=certificate_id,
+        evidence_id=certificate.evidence_id,
+        summary=f"Verified certificate; result {result.overall_status}.",
+        safe_metadata={
+            "overall_status": str(result.overall_status),
+            "signer_trusted": bool(result.signer_trusted),
+            "signature_valid": bool(result.signature_valid),
+            "expected_operation_id": expectations.expected_operation_id,
+            "expected_target_identity": expectations.expected_target_identity,
+        },
+    )
 
     return CertificateVerificationOut(
         certificate_id=result.certificate_id,

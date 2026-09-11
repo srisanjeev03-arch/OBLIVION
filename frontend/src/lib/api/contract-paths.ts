@@ -9,6 +9,7 @@
 
 /** Format: `"<VERB> <path>"`, with path parameters left as `{name}`. */
 export const CONTRACT_OPERATIONS: readonly string[] = [
+  'GET /api/audit/events',
   'GET /api/auth/me',
   'GET /api/certificates/{certificate_id}',
   'GET /api/operations/{operation_id}',
@@ -16,6 +17,7 @@ export const CONTRACT_OPERATIONS: readonly string[] = [
   'GET /api/recovery-objects',
   'GET /api/targets/{target_id}',
   'GET /health',
+  'POST /api/audit/verify',
   'POST /api/auth/login',
   'POST /api/auth/logout',
   'POST /api/certificates/{certificate_id}/verify',

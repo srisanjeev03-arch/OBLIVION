@@ -650,6 +650,157 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/audit/events:
+    get:
+      tags:
+      - audit
+      summary: List Audit Events
+      description: 'Read audit records, oldest first (requires ``audit.view``).
+
+
+        Unrecognised filter values are rejected with 422 rather than ignored. A
+
+        filter that is silently dropped returns *more* than was asked for while
+
+        looking like it returned exactly what was asked for - in an audit context,
+
+        a way to miss the record you were told to find.'
+      operationId: list_audit_events_api_audit_events_get
+      parameters:
+      - name: operation_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Operation Id
+      - name: actor_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Actor Id
+      - name: event_type
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Event Type
+      - name: outcome
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Outcome
+      - name: since
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Since
+      - name: until
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Until
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 100
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEventPageOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/audit/verify:
+    post:
+      tags:
+      - audit
+      summary: Verify Audit Chain Endpoint
+      description: 'Verify the persisted audit chain (requires ``audit.verify``).
+
+
+        Records are loaded from storage and rehashed. The caller supplies no
+
+        digests, no records and no expected outcome - there is no field in this
+
+        request in which to assert that the log is intact, which is what keeps the
+
+        answer the server''s rather than the caller''s.'
+      operationId: verify_audit_chain_endpoint_api_audit_verify_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/AuditVerifyRequest'
+              - type: 'null'
+              title: Request
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditChainVerificationOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /health:
     get:
       tags:
@@ -677,6 +828,217 @@ components:
       - INCONCLUSIVE
       - FAILED
       title: AssuranceStatusOut
+    AuditChainVerificationOut:
+      properties:
+        status:
+          type: string
+          title: Status
+        checked:
+          type: integer
+          title: Checked
+        reason:
+          type: string
+          title: Reason
+        links:
+          items:
+            $ref: '#/components/schemas/AuditLinkOut'
+          type: array
+          title: Links
+        first_invalid_audit_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: First Invalid Audit Id
+        records_predating_chain:
+          type: integer
+          title: Records Predating Chain
+          default: 0
+        proves:
+          items:
+            type: string
+          type: array
+          title: Proves
+        does_not_prove:
+          items:
+            type: string
+          type: array
+          title: Does Not Prove
+        scope_note:
+          type: string
+          title: Scope Note
+          default: This result describes the integrity of the audit log only. It is not a statement about evidence
+            integrity, erasure success, or certificate trust, each of which is verified separately against its own
+            artefact.
+      type: object
+      required:
+      - status
+      - checked
+      - reason
+      - links
+      - proves
+      - does_not_prove
+      title: AuditChainVerificationOut
+      description: The result of verifying the persisted audit chain.
+    AuditEventOut:
+      properties:
+        audit_id:
+          type: string
+          title: Audit Id
+        sequence:
+          type: integer
+          title: Sequence
+        event_type:
+          type: string
+          title: Event Type
+        outcome:
+          type: string
+          title: Outcome
+        actor_id:
+          type: string
+          title: Actor Id
+        actor_role:
+          type: string
+          title: Actor Role
+        actor_source:
+          type: string
+          title: Actor Source
+        operation_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Operation Id
+        target_identity:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Identity
+        evidence_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Evidence Id
+        certificate_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Certificate Id
+        summary:
+          type: string
+          title: Summary
+          default: ''
+        safe_metadata:
+          additionalProperties: true
+          type: object
+          title: Safe Metadata
+        occurred_at:
+          type: string
+          format: date-time
+          title: Occurred At
+        digest:
+          type: string
+          title: Digest
+        previous_audit_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Previous Audit Id
+        previous_audit_digest:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Previous Audit Digest
+      type: object
+      required:
+      - audit_id
+      - sequence
+      - event_type
+      - outcome
+      - actor_id
+      - actor_role
+      - actor_source
+      - occurred_at
+      - digest
+      title: AuditEventOut
+      description: One audit record as published.
+    AuditEventPageOut:
+      properties:
+        events:
+          items:
+            $ref: '#/components/schemas/AuditEventOut'
+          type: array
+          title: Events
+        returned:
+          type: integer
+          title: Returned
+        total_records:
+          type: integer
+          title: Total Records
+        records_predating_chain:
+          type: integer
+          title: Records Predating Chain
+          default: 0
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+      - events
+      - returned
+      - total_records
+      - limit
+      - offset
+      title: AuditEventPageOut
+      description: 'A page of audit records, oldest first.
+
+
+        ``total_records`` is the height of the whole log, not the size of this
+
+        page, so a reader can tell a page is a window without inferring it from the
+
+        page happening to be full.'
+    AuditLinkOut:
+      properties:
+        audit_id:
+          type: string
+          title: Audit Id
+        sequence:
+          type: integer
+          title: Sequence
+        status:
+          type: string
+          title: Status
+        detail:
+          type: string
+          title: Detail
+      type: object
+      required:
+      - audit_id
+      - sequence
+      - status
+      - detail
+      title: AuditLinkOut
+    AuditVerifyRequest:
+      properties:
+        operation_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Operation Id
+      type: object
+      title: AuditVerifyRequest
+      description: 'Optional narrowing for a verification request.
+
+
+        Supplying ``operation_id`` narrows which records are examined. It cannot
+
+        make a window look complete: a subset that does not begin at the genesis
+
+        record is reported ``UNVERIFIABLE``, because the chain spans every event in
+
+        the system and a per-operation slice necessarily has history before it.'
     CertificateOut:
       properties:
         id:

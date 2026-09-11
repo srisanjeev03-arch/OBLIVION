@@ -15,13 +15,18 @@ from oblivion.certificate.trust_model import (
     TrustStoreError,
     load_trust_store_from_env,
 )
+from oblivion.core.audit import (
+    AuditActor,
+    AuditEventType,
+    AuditLog,
+    AuditOutcome,
+)
 from oblivion.core.auth.passwords import hash_session_token
 from oblivion.core.auth.rbac import has_permission
 from oblivion.core.erasure.events import EngineEventEmitter
 from oblivion.core.erasure.vault import RecoveryVault
 from oblivion.core.safety.paths import SafePathValidator
 from oblivion.persistence.database import get_session_factory, init_db
-from oblivion.persistence.models.audit import AuditEventModel
 from oblivion.persistence.models.operation import OperationEventModel
 from oblivion.persistence.models.user import UserModel
 from oblivion.persistence.repositories.user_repo import UserRepository
@@ -134,6 +139,25 @@ def require_permission(required_permission: str) -> Callable[..., UserModel]:
         return current_user
 
     return _permission_guard
+
+
+def resolve_audit_actor(user: UserModel, db: Session) -> AuditActor:
+    """Build an audit actor from an *already authenticated* principal.
+
+    The only inputs are the ``UserModel`` that ``get_current_user`` resolved
+    from a server-side session record, and that user's roles read from the
+    database. Nothing here reads the request, so there is no path by which a
+    body field, header or query parameter can decide who an act is attributed
+    to.
+
+    Multiple roles are recorded joined and sorted rather than reduced to one.
+    Picking a single "primary" role would need a precedence rule this system
+    does not define, and inventing one would make the audit record state
+    something the authorization model never decided.
+    """
+    roles = UserRepository(db).get_user_role_names(user.id)
+    label = ",".join(sorted(roles)) if roles else "NONE"
+    return AuditActor.authenticated(user.id, label)
 
 
 def require_role(required_role: str) -> Callable[..., UserModel]:
@@ -357,6 +381,27 @@ def get_privileged_client(
     return PrivilegedClient(transport, authenticator)
 
 
+def _safe_engine_metadata(
+    event_type: str, details: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Reduce engine event details to values the canonicalizer can encode.
+
+    The canonicalizer refuses types it cannot represent deterministically
+    rather than coercing them, which is right for evidence but would turn an
+    ordinary engine event into a failed request here. Values are therefore
+    narrowed to JSON primitives at this boundary, and anything else is recorded
+    as its string form with the conversion made visible in the key name, so a
+    reader is never left believing a stringified object was the original value.
+    """
+    safe: dict[str, Any] = {"engine_event_type": event_type}
+    for key, value in (details or {}).items():
+        if value is None or isinstance(value, bool | int | float | str):
+            safe[key] = value
+        else:
+            safe[f"{key}_repr"] = str(value)
+    return safe
+
+
 class DatabaseEventEmitter(EngineEventEmitter):
     """Engine event emitter that persists events to SQLite/SQLAlchemy."""
 
@@ -385,19 +430,28 @@ class DatabaseEventEmitter(EngineEventEmitter):
 
         self.session.add(op_event)
 
-        # 2. Record audit event
-        audit_event = AuditEventModel(
-            id=f"audit_{uuid.uuid4().hex[:12]}",
-            event_type=event_type,
+        # 2. Record the act in the authoritative audit log.
+        #
+        # The previous revision wrote a row here with `actor_id="system"` and
+        # `outcome="OK"` hard-coded, metadata as a Python repr, and a bare
+        # `except Exception: pass` around the flush. Every one of those made the
+        # log less able to answer the question it exists for: the actor was a
+        # constant, the outcome was a constant, the metadata could not be parsed
+        # back, and a write that failed left no trace of having failed.
+        #
+        # The engine genuinely has no human principal to name - it is the
+        # application acting on its own behalf - so the actor is recorded as
+        # SYSTEM and marked as such, rather than borrowing an identity it cannot
+        # substantiate. The human who authorized the operation is recorded
+        # separately, by the route that took their authenticated request.
+        AuditLog(self.session).append(
+            AuditEventType.OPERATION_STATE_CHANGED,
+            AuditOutcome.SUCCEEDED,
+            AuditActor.system("erasure_engine"),
             operation_id=operation_id,
-            target_id=target_path,
-            actor_id="system",
-            outcome="OK",
-            safe_metadata=str(details) if details else None,
+            target_identity=target_path,
+            summary=f"Engine event {event_type}.",
+            safe_metadata=_safe_engine_metadata(event_type, details),
         )
-        self.session.add(audit_event)
 
-        try:
-            self.session.flush()
-        except Exception:
-            pass
+        self.session.flush()

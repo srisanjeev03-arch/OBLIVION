@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from oblivion.api.dependencies import (
     DatabaseEventEmitter,
     get_db,
+    resolve_audit_actor,
     get_recovery_vault,
     get_safe_validator,
     get_vault_key,
@@ -18,6 +19,12 @@ from oblivion.api.schemas.operation import (
     OperationEventOut,
     OperationOut,
 )
+from oblivion.core.audit import (
+    AuditEventType,
+    AuditLog,
+    AuditOutcome,
+    append_independently,
+)
 from oblivion.core.auth.sod import (
     SoDViolationError,
     validate_approval,
@@ -26,6 +33,7 @@ from oblivion.core.erasure.engine import ErasureEngine, ErasureMode
 from oblivion.core.erasure.vault import RecoveryVault
 from oblivion.core.policy import PolicyEngine, PolicyError
 from oblivion.core.safety.paths import SafePathValidator
+from oblivion.persistence.database import get_session_factory
 from oblivion.persistence.models.operation import OperationEventModel
 from oblivion.persistence.models.user import UserModel
 from oblivion.persistence.repositories.operation_repo import OperationRepository
@@ -113,6 +121,23 @@ async def create_operation(
         target_path=target.canonical_path,
         details={"state": "PENDING_APPROVAL", "mode": request.mode, "policy_id": request.policy_id, "requested_by": current_user.id},
     )
+    AuditLog(db).append(
+        AuditEventType.OPERATION_CREATED,
+        AuditOutcome.SUCCEEDED,
+        resolve_audit_actor(current_user, db),
+        operation_id=operation_id,
+        target_identity=target.canonical_path,
+        summary="Requested an erasure operation; awaiting a second actor's approval.",
+        safe_metadata={
+            "mode": request.mode,
+            "policy_id": policy_def.policy_id,
+            "state": "PENDING_APPROVAL",
+            # The requester is recorded here as well as in the operation row,
+            # so the separation-of-duties pair can be reconstructed from the
+            # audit log alone, without trusting the mutable operation record.
+            "requested_by": current_user.id,
+        },
+    )
     db.flush()
 
     return OperationOut(
@@ -164,6 +189,18 @@ async def approve_operation(
     try:
         validate_approval(requested_by=op.requested_by, approving_actor_id=current_user.id)
     except SoDViolationError as e:
+        # Committed separately: this request raises 403 and its transaction is
+        # rolled back, but a refused self-approval is precisely the event an
+        # auditor needs to see. It must outlive the request that caused it.
+        append_independently(
+            get_session_factory(),
+            AuditEventType.OPERATION_APPROVAL_REFUSED,
+            AuditOutcome.REFUSED,
+            resolve_audit_actor(current_user, db),
+            operation_id=operation_id,
+            summary="Approval refused: separation of duties.",
+            safe_metadata={"requested_by": op.requested_by, "reason": str(e)},
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"error_code": "FORBIDDEN", "message": str(e)},
@@ -180,6 +217,19 @@ async def approve_operation(
         from_state="PENDING_APPROVAL",
         to_state="READY",
         payload=str({"approved_by": current_user.id}),
+    )
+    AuditLog(db).append(
+        AuditEventType.OPERATION_APPROVED,
+        AuditOutcome.SUCCEEDED,
+        resolve_audit_actor(current_user, db),
+        operation_id=operation_id,
+        summary="Approved the operation.",
+        safe_metadata={
+            # Both halves of the duty split, in one immutable record.
+            "requested_by": op.requested_by,
+            "approved_by": current_user.id,
+            "to_state": "READY",
+        },
     )
     db.flush()
 
@@ -283,6 +333,24 @@ async def execute_operation_endpoint(
         errors = op_result.get("failed", []) + op_result.get("blocked", [])
         op.error_code = "ERASURE_ERROR" if op_result.get("failed") else "SAFETY_VIOLATION"
 
+    # The engine's own verdict, recorded as given. A COMPLETED here means the
+    # erasure step reported success - it is not an assurance claim, and nothing
+    # in this record should be read as one.
+    AuditLog(db).append(
+        AuditEventType.OPERATION_EXECUTED,
+        AuditOutcome.SUCCEEDED if final_state == "COMPLETED" else AuditOutcome.FAILED,
+        resolve_audit_actor(current_user, db),
+        operation_id=operation_id,
+        target_identity=target.canonical_path,
+        summary=f"Executed the approved operation; engine reported {final_state}.",
+        safe_metadata={
+            "final_state": final_state,
+            "requested_by": op.requested_by,
+            "approved_by": op.approved_by,
+            "executed_by": current_user.id,
+            "error_code": op.error_code,
+        },
+    )
     db.flush()
 
     return OperationOut(
@@ -370,6 +438,14 @@ async def cancel_operation(
         event_type="OPERATION_CANCELLED",
         from_state="READY",
         to_state="CANCELLED",
+    )
+    AuditLog(db).append(
+        AuditEventType.OPERATION_CANCELLED,
+        AuditOutcome.SUCCEEDED,
+        resolve_audit_actor(current_user, db),
+        operation_id=operation_id,
+        summary="Cancelled the operation before execution.",
+        safe_metadata={"cancelled_by": current_user.id},
     )
     db.flush()
 

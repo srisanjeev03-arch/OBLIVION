@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from oblivion.api.routes import (
+    audit_router,
     auth_router,
     certificates_router,
     evidence_router,
@@ -90,6 +91,7 @@ def create_app() -> FastAPI:
     app.include_router(recovery_router)
     app.include_router(certificates_router)
     app.include_router(evidence_router)
+    app.include_router(audit_router)
 
 
     @app.get("/health", tags=["system"])
