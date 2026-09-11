@@ -12,6 +12,7 @@ export const CONTRACT_OPERATIONS: readonly string[] = [
   'GET /api/audit/events',
   'GET /api/auth/me',
   'GET /api/certificates/{certificate_id}',
+  'GET /api/operations',
   'GET /api/operations/{operation_id}',
   'GET /api/operations/{operation_id}/events',
   'GET /api/recovery-objects',

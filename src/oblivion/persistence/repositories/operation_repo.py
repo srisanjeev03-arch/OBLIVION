@@ -1,6 +1,7 @@
 """Operation repository."""
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from oblivion.persistence.models.operation import (
@@ -33,6 +34,54 @@ class OperationRepository:
 
     def get_operation(self, operation_id: str) -> OperationModel | None:
         return self.session.get(OperationModel, operation_id)
+
+    def list_operations(
+        self,
+        *,
+        state: str | None = None,
+        operation_id: str | None = None,
+        requested_by: str | None = None,
+        target_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[OperationModel], int]:
+        """Persisted operations, newest first, with the total before paging.
+
+        Filtering happens in the database rather than in the route. A route that
+        fetched everything and filtered in Python would still have *read* every
+        operation, which is the wrong shape for a record an auditor relies on -
+        and it would degrade badly as the table grows.
+
+        The total is returned alongside the page so a caller can tell "this is
+        page one of many" from "this is everything", without inferring it from a
+        full page.
+        """
+        conditions = []
+        if state:
+            conditions.append(OperationModel.state == state)
+        if operation_id:
+            conditions.append(OperationModel.id == operation_id)
+        if requested_by:
+            conditions.append(OperationModel.requested_by == requested_by)
+        if target_id:
+            conditions.append(OperationModel.target_id == target_id)
+
+        total_stmt = select(func.count()).select_from(OperationModel)
+        page_stmt = select(OperationModel)
+        for condition in conditions:
+            total_stmt = total_stmt.where(condition)
+            page_stmt = page_stmt.where(condition)
+
+        total = int(self.session.execute(total_stmt).scalar_one())
+        page_stmt = (
+            page_stmt.order_by(
+                OperationModel.created_at.desc(), OperationModel.id.desc()
+            )
+            .offset(max(0, offset))
+            .limit(max(1, limit))
+        )
+        rows = list(self.session.execute(page_stmt).scalars().all())
+        return rows, total
 
     def append_event(self, event_id: str, operation_id: str, sequence: int, event_type: str, **kwargs: Any) -> OperationEventModel:
         ev = OperationEventModel(

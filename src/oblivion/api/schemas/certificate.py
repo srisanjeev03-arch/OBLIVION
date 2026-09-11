@@ -7,9 +7,10 @@ manufacture for itself. A client may not assert anything about the *outcome*:
 there is no field for signer trust, evidence integrity, or the verdict, so no
 request can talk the server into a result it did not compute.
 """
+import json
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class EvidenceRecordOut(BaseModel):
@@ -43,6 +44,43 @@ class CertificateOut(BaseModel):
     signature: str
     claim: str | None = None
     issued_at: datetime
+
+    #: Scope limitations, part of the signed canonical payload.
+    #:
+    #: These were persisted and signed but never published, so a reader could
+    #: fetch a certificate and not see the statements that stop it being
+    #: overclaimed - that no device or media sanitization is performed, and that
+    #: logical deletion does not establish physical or NAND irrecoverability.
+    #: A certificate without its limitations reads as a stronger claim than the
+    #: one that was actually signed.
+    #:
+    #: Returned from storage, never from the caller. Nothing here changes what
+    #: is signed or how it is canonicalized; this publishes a field that was
+    #: already inside the signature.
+    limitations: list[str] = Field(default_factory=list)
+
+    @field_validator("limitations", mode="before")
+    @classmethod
+    def _accept_persisted_form(cls, value: object) -> object:
+        """Accept either the parsed list or the JSON text the column holds.
+
+        The route validates straight off the ORM row, where `limitations` is the
+        JSON string written at issuance. A malformed value is surfaced as a
+        single entry rather than dropped: silently returning an empty list would
+        turn "the limitations could not be read" into "there are none", which is
+        the stronger claim and the wrong one.
+        """
+        if value is None:
+            return []
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                return [value]
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed]
+            return [str(parsed)]
+        return value
 
 
 class CertificateVerificationRequest(BaseModel):

@@ -209,6 +209,119 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - operations
+      summary: List Operations
+      description: 'List persisted operations (requires ``operation.view``).
+
+
+        This closes the gap that forced an operator to paste an operation ID into
+
+        the address bar: the console had a ledger and the contract published no way
+
+        to fill it.
+
+
+        Filtering is applied in the database, and every field returned comes from a
+
+        persisted row. Nothing is synthesised - no identifier, no state, no
+
+        progress. An operation that does not exist does not appear.
+
+
+        Authorization is the existing model, unchanged: ``operation.view`` is held
+
+        by ADMIN, INVESTIGATOR, OPERATOR, AUDITOR and VIEWER, and this route exposes
+
+        only operation records. It is not a general database listing, and it exposes
+
+        no audit, evidence or certificate material - those keep their own
+
+        permissions (``audit.view``, ``evidence.view``).
+
+
+        An unrecognised ``state`` is refused rather than ignored: a filter silently
+
+        dropped returns more than was asked for while looking like it returned
+
+        exactly what was asked for.'
+      operationId: list_operations_api_operations_get
+      parameters:
+      - name: state
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: State
+      - name: operation_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Operation Id
+      - name: requested_by
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Requested By
+      - name: target_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Target Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationPageOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/operations/{operation_id}/approve:
     post:
       tags:
@@ -1111,6 +1224,11 @@ components:
           type: string
           format: date-time
           title: Issued At
+        limitations:
+          items:
+            type: string
+          type: array
+          title: Limitations
       type: object
       required:
       - id
@@ -1524,6 +1642,46 @@ components:
       - state
       - created_at
       title: OperationOut
+    OperationPageOut:
+      properties:
+        operations:
+          items:
+            $ref: '#/components/schemas/OperationOut'
+          type: array
+          title: Operations
+        returned:
+          type: integer
+          title: Returned
+        total:
+          type: integer
+          title: Total
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+      - operations
+      - returned
+      - total
+      - limit
+      - offset
+      title: OperationPageOut
+      description: 'A page of persisted operations, newest first.
+
+
+        ``total`` is the number of operations matching the filter, not the size of
+
+        this page, so a reader can tell a window from the whole set without
+
+        inferring it from the page happening to be full.
+
+
+        Every row comes from the database. No identifier and no state is
+
+        synthesised here; an operation that does not exist simply does not appear.'
     OperationStateOut:
       type: string
       enum:

@@ -58,6 +58,24 @@ class OperationOut(BaseModel):
     completed_at: datetime | None = None
 
 
+class OperationPageOut(BaseModel):
+    """A page of persisted operations, newest first.
+
+    ``total`` is the number of operations matching the filter, not the size of
+    this page, so a reader can tell a window from the whole set without
+    inferring it from the page happening to be full.
+
+    Every row comes from the database. No identifier and no state is
+    synthesised here; an operation that does not exist simply does not appear.
+    """
+
+    operations: list[OperationOut]
+    returned: int
+    total: int
+    limit: int
+    offset: int
+
+
 class OperationEventOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str

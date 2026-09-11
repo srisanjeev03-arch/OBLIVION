@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from oblivion.api import app
 from oblivion.certificate.issuer import CertificateIssuer, IssuanceRequest
 from oblivion.certificate.keys import SigningKeyManager, generate_private_key_hex
+from oblivion.certificate.signer import Ed25519SignerVerifier
 from oblivion.certificate.trust_model import ENV_TRUSTED_SIGNERS
 from oblivion.core.evidence.generator import EvidenceGenerationContext, EvidenceGenerator
 from oblivion.core.evidence.record import TargetDescriptor
@@ -318,3 +319,94 @@ def test_no_private_key_is_ever_returned(issued, auditor_client):
     assert fetched.status_code == 200
     assert private_hex not in fetched.text
     assert "private" not in fetched.json()
+
+
+# ---------------------------------------------------------------------------
+# F-B: limitations are part of the signed payload and must be published
+# ---------------------------------------------------------------------------
+
+
+def test_fetching_a_certificate_returns_its_signed_limitations(issued, auditor_client):
+    """A certificate without its limitations reads as a stronger claim.
+
+    `limitations` was already inside the canonical payload the signature covers,
+    and was already persisted - it simply was not published. A reader fetching
+    the certificate therefore could not see the statements that stop it being
+    overclaimed, which is the one thing this product must never allow.
+    """
+    response = auditor_client.get(f"/api/certificates/{issued['certificate_id']}")
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert "limitations" in body, "the signed limitations must be published"
+    assert isinstance(body["limitations"], list)
+    assert body["limitations"], "a certificate signed with limitations must return them"
+
+    published = " ".join(body["limitations"])
+    # The limitation the evidence carried.
+    assert "no sanitization performed" in published
+    # And the issuer's own scope statement, which is the one that stops a reader
+    # treating a certificate as proof of things the evidence never established.
+    assert "attests only to what the evidence records" in published
+    assert "Not established" in published
+
+
+def test_published_limitations_match_the_signed_payload(issued, auditor_client):
+    """What the API returns must be what the signature actually covers."""
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        reloaded = CertificateRepository(session).load_certificate(
+            issued["certificate_id"]
+        )
+    assert reloaded is not None
+
+    body = auditor_client.get(f"/api/certificates/{issued['certificate_id']}").json()
+
+    assert body["limitations"] == list(reloaded.limitations)
+    # And the signed payload still carries them, unchanged by publication.
+    assert reloaded.signing_payload()["limitations"] == list(reloaded.limitations)
+
+
+def test_publishing_limitations_did_not_change_the_signature(issued, auditor_client):
+    """Adding a response field must not touch canonicalization or signing."""
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        repo = CertificateRepository(session)
+        reloaded = repo.load_certificate(issued["certificate_id"])
+    assert reloaded is not None
+
+    # The certificate still verifies against its own signer, byte for byte.
+    # The public key is passed explicitly - `verify` takes it as an argument
+    # rather than reading ambient state, which is what keeps a verifier from
+    # accidentally trusting whatever key happens to be configured.
+    assert Ed25519SignerVerifier.verify(
+        issued["key_manager"].public_key_bytes(),
+        reloaded.signing_bytes(),
+        bytes.fromhex(reloaded.signature),
+    ), "the signature must still cover the unchanged canonical payload"
+
+    # And the end-to-end verdict is unaffected by the new response field.
+    result = _verify(
+        auditor_client,
+        issued["certificate_id"],
+        {
+            "expected_operation_id": issued["operation_id"],
+            "expected_target_identity": issued["target_identity"],
+        },
+    ).json()
+    assert result["overall_status"] == "VALID"
+    assert len(result["dimensions"]) == 10
+
+
+def test_a_client_cannot_supply_limitations(issued, auditor_client):
+    """The field is returned from storage, never accepted from a caller."""
+    from oblivion.api.schemas.certificate import CertificateVerificationRequest
+
+    assert "limitations" not in CertificateVerificationRequest.model_fields
+    # And the verification request forbids unknown fields outright.
+    response = _verify(
+        auditor_client,
+        issued["certificate_id"],
+        {"limitations": ["no limits at all"]},
+    )
+    assert response.status_code == 422

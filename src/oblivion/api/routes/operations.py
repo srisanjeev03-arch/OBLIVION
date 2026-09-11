@@ -2,7 +2,7 @@
 import datetime
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from oblivion.api.dependencies import (
@@ -18,6 +18,7 @@ from oblivion.api.schemas.operation import (
     CreateOperationRequest,
     OperationEventOut,
     OperationOut,
+    OperationPageOut,
 )
 from oblivion.core.audit import (
     AuditEventType,
@@ -32,6 +33,7 @@ from oblivion.core.auth.sod import (
 from oblivion.core.erasure.engine import ErasureEngine, ErasureMode
 from oblivion.core.erasure.vault import RecoveryVault
 from oblivion.core.policy import PolicyEngine, PolicyError
+from oblivion.core.state.machine import State
 from oblivion.core.safety.paths import SafePathValidator
 from oblivion.persistence.database import get_session_factory
 from oblivion.persistence.models.operation import OperationEventModel
@@ -39,6 +41,40 @@ from oblivion.persistence.models.user import UserModel
 from oblivion.persistence.repositories.operation_repo import OperationRepository
 
 router = APIRouter(prefix="/api/operations", tags=["operations"])
+
+#: Hard ceiling on a listing page, so a read cannot be turned into a denial of
+#: service against the database.
+_MAX_PAGE = 200
+
+#: Every state the machine can actually reach. A filter naming anything else is
+#: refused rather than returning an empty page, which would read as "there are
+#: no operations in that state" when the truth is "that state does not exist".
+_KNOWN_STATES: frozenset[str] = frozenset(member.name for member in State)
+
+#: Progress shown for a listed operation, derived from its persisted state.
+#:
+#: Deliberately coarse and deliberately not invented: the operations table
+#: stores no progress column, so anything finer would be a number this system
+#: never measured. A terminal state is 100% complete in the sense that nothing
+#: further will happen to it - not in the sense that it succeeded.
+_TERMINAL_STATES: frozenset[str] = frozenset(
+    {
+        State.COMPLETED.name,
+        State.FAILED.name,
+        State.PARTIAL.name,
+        State.INCONCLUSIVE.name,
+        State.CANCELLED.name,
+    }
+)
+
+
+def _progress_for(state: str) -> float:
+    """Coarse progress from the persisted state. Never a fabricated percentage."""
+    if state in _TERMINAL_STATES:
+        return 100.0
+    if state == State.READY.name:
+        return 10.0
+    return 0.0
 
 
 @router.post("", response_model=OperationOut, status_code=status.HTTP_202_ACCEPTED)
@@ -153,6 +189,81 @@ async def create_operation(
         created_at=op_model.created_at,
         started_at=op_model.started_at,
         completed_at=op_model.completed_at,
+    )
+
+
+@router.get("", response_model=OperationPageOut, status_code=status.HTTP_200_OK)
+async def list_operations(
+    state: str | None = Query(None, max_length=32),
+    operation_id: str | None = Query(None, max_length=64),
+    requested_by: str | None = Query(None, max_length=64),
+    target_id: str | None = Query(None, max_length=64),
+    limit: int = Query(50, ge=1, le=_MAX_PAGE),
+    offset: int = Query(0, ge=0),
+    current_user: UserModel = Depends(require_permission("operation.view")),
+    db: Session = Depends(get_db),
+) -> OperationPageOut:
+    """List persisted operations (requires ``operation.view``).
+
+    This closes the gap that forced an operator to paste an operation ID into
+    the address bar: the console had a ledger and the contract published no way
+    to fill it.
+
+    Filtering is applied in the database, and every field returned comes from a
+    persisted row. Nothing is synthesised - no identifier, no state, no
+    progress. An operation that does not exist does not appear.
+
+    Authorization is the existing model, unchanged: ``operation.view`` is held
+    by ADMIN, INVESTIGATOR, OPERATOR, AUDITOR and VIEWER, and this route exposes
+    only operation records. It is not a general database listing, and it exposes
+    no audit, evidence or certificate material - those keep their own
+    permissions (``audit.view``, ``evidence.view``).
+
+    An unrecognised ``state`` is refused rather than ignored: a filter silently
+    dropped returns more than was asked for while looking like it returned
+    exactly what was asked for.
+    """
+    if state is not None and state not in _KNOWN_STATES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error_code": "UNKNOWN_OPERATION_STATE",
+                "message": f"'{state}' is not an operation state this system can reach",
+            },
+        )
+
+    repo = OperationRepository(db)
+    rows, total = repo.list_operations(
+        state=state,
+        operation_id=operation_id,
+        requested_by=requested_by,
+        target_id=target_id,
+        limit=limit,
+        offset=offset,
+    )
+
+    return OperationPageOut(
+        operations=[
+            OperationOut(
+                id=row.id,
+                target_id=row.target_id,
+                mode=row.mode,
+                state=row.state,
+                policy_id=row.policy_id,
+                progress_percent=_progress_for(row.state),
+                warnings=[row.warnings] if row.warnings else [],
+                error=None,
+                actor_id=row.actor_id,
+                created_at=row.created_at,
+                started_at=row.started_at,
+                completed_at=row.completed_at,
+            )
+            for row in rows
+        ],
+        returned=len(rows),
+        total=total,
+        limit=limit,
+        offset=offset,
     )
 
 

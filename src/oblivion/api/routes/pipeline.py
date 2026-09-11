@@ -40,6 +40,7 @@ from oblivion.certificate.keys import SigningKeyManager
 from oblivion.certificate.trust_model import TrustStore
 from oblivion.core.audit import AuditEventType, AuditLog, AuditOutcome
 from oblivion.core.pipeline import ClosedLoopPipeline, PipelineRequest
+from oblivion.core.pipeline.orchestrator import Stage, StageStatus
 from oblivion.core.safety.paths import SafePathValidator
 from oblivion.core.state.machine import State
 from oblivion.persistence.models.user import UserModel
@@ -47,6 +48,37 @@ from oblivion.persistence.repositories.operation_repo import OperationRepository
 from oblivion.privileged.client import PrivilegedClient
 
 router = APIRouter(prefix="/api/operations", tags=["pipeline"])
+
+#: How an ERASE stage outcome maps onto the audit vocabulary.
+#:
+#: The three audit outcomes mean different things and are never collapsed:
+#:
+#: * ``SUCCEEDED`` - permitted, attempted, completed.
+#: * ``FAILED``    - permitted and attempted, did not complete.
+#: * ``REFUSED``   - the system declined; nothing was destroyed.
+#:
+#: ``UNAVAILABLE`` maps to FAILED rather than REFUSED: the operation had already
+#: passed authorization, so the destructive step was permitted and simply could
+#: not be carried out. ``SKIPPED`` maps to REFUSED because the pipeline only
+#: skips ERASE when an earlier stage - authorization, in practice - declined, and
+#: in that case nothing was destroyed.
+#:
+#: The mapping is total over ``StageStatus``; a new member added to that enum
+#: without a decision here fails the test that asserts this table covers it,
+#: rather than silently defaulting to one of the three.
+_ERASE_OUTCOME: dict[StageStatus, AuditOutcome] = {
+    StageStatus.COMPLETED: AuditOutcome.SUCCEEDED,
+    StageStatus.FAILED: AuditOutcome.FAILED,
+    StageStatus.UNAVAILABLE: AuditOutcome.FAILED,
+    StageStatus.REFUSED: AuditOutcome.REFUSED,
+    StageStatus.SKIPPED: AuditOutcome.REFUSED,
+}
+
+#: Stage outcomes that mean the destructive step was actually attempted. Only
+#: these justify writing an `OPERATION_EXECUTED` record.
+_ERASE_ATTEMPTED: frozenset[StageStatus] = frozenset(
+    {StageStatus.COMPLETED, StageStatus.FAILED, StageStatus.UNAVAILABLE}
+)
 
 
 @router.post(
@@ -166,23 +198,35 @@ async def run_pipeline(
     # here means the erase stage reported success and the post-state was
     # re-observed; it is not an assurance claim, and the assurance verdict is
     # recorded separately below precisely so the two cannot be conflated.
-    erase_status = next(
-        (str(stage.status) for stage in result.stages if str(stage.stage) == "ERASE"),
-        "NOT_RUN",
-    )
-    audit.append(
-        AuditEventType.OPERATION_EXECUTED,
-        AuditOutcome.SUCCEEDED if erase_status == "COMPLETED" else AuditOutcome.FAILED,
-        actor,
-        operation_id=operation.id,
-        target_identity=target.canonical_path,
-        evidence_id=result.evidence_id,
-        summary=f"Erase stage reported {erase_status}.",
-        safe_metadata={
-            "erase_status": erase_status,
-            "final_state": str(result.final_state),
-        },
-    )
+    #
+    # Located by enum identity. `Stage` mixes in `str`, but `Enum.__str__` still
+    # wins, so `str(Stage.ERASE)` is "Stage.ERASE" and comparing it against
+    # "ERASE" is always false - which is exactly how every run came to record
+    # `erase_status: NOT_RUN` with an outcome of FAILED while the stage had in
+    # fact COMPLETED. Identity cannot drift that way; `.value` is used wherever
+    # the wire form is wanted.
+    erase = next((stage for stage in result.stages if stage.stage is Stage.ERASE), None)
+    erase_status = erase.status if erase is not None else None
+
+    # `OPERATION_EXECUTED` is written only when the destructive step was actually
+    # attempted. Emitting it for an operation the pipeline refused would place a
+    # record of an execution that never happened into an append-only log - the
+    # precise class of false record this system exists to prevent. Where nothing
+    # was executed, the refusal is carried by PIPELINE_CONCLUDED below.
+    if erase_status is not None and erase_status in _ERASE_ATTEMPTED:
+        audit.append(
+            AuditEventType.OPERATION_EXECUTED,
+            _ERASE_OUTCOME[erase_status],
+            actor,
+            operation_id=operation.id,
+            target_identity=target.canonical_path,
+            evidence_id=result.evidence_id,
+            summary=f"Erase stage reported {erase_status.value}.",
+            safe_metadata={
+                "erase_status": erase_status.value,
+                "final_state": result.final_state,
+            },
+        )
 
     if result.evidence_id:
         audit.append(
@@ -208,9 +252,17 @@ async def run_pipeline(
     # The conclusion, with the assurance verdict kept in its own field rather
     # than folded into the outcome. INCONCLUSIVE and PARTIAL are real answers,
     # and an audit record that rendered them as failure would misreport them.
+    #
+    # The outcome describes the *disposition of the destructive step*, not
+    # whether the request returned 200. It was hard-coded SUCCEEDED, which meant
+    # a refused operation and a completed one left identical conclusions in the
+    # log. An erase that never ran is REFUSED here; one that ran and did not
+    # complete is FAILED; neither is a success.
     audit.append(
         AuditEventType.PIPELINE_CONCLUDED,
-        AuditOutcome.SUCCEEDED,
+        _ERASE_OUTCOME.get(erase_status, AuditOutcome.REFUSED)
+        if erase_status is not None
+        else AuditOutcome.REFUSED,
         actor,
         operation_id=operation.id,
         target_identity=result.target_identity,
@@ -218,7 +270,8 @@ async def run_pipeline(
         certificate_id=result.certificate_id,
         summary=f"Pipeline concluded in {result.final_state}.",
         safe_metadata={
-            "final_state": str(result.final_state),
+            "final_state": result.final_state,
+            "erase_status": erase_status.value if erase_status is not None else "NOT_RUN",
             # Kept as separate named fields. "The pipeline finished" and "the
             # assurance engine reached a positive verdict" are different facts,
             # and INCONCLUSIVE is a real answer rather than a failure.
