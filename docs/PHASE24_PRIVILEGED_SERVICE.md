@@ -144,6 +144,49 @@ pass the freshness check, so memory is bounded without opening a gap. A
 correctly formed, correctly signed request is still refused on its second
 arrival.
 
+### Cache lifetime — process/service, **not** restart-persistent
+
+Replay protection is **scoped to the lifetime of the cache object**, and nothing
+longer. Stated precisely, per deployment:
+
+| Deployment | Cache owner | Protection lasts |
+|---|---|---|
+| HTTP API (in-process transport) | `app.state.privileged_replay_cache`, created in `create_app()` | The life of the FastAPI application |
+| Named-pipe host | The long-lived `PrivilegedService` the host constructs | The life of that host process |
+
+The HTTP service object itself is rebuilt per request — it is cheap, and its
+validator must track configuration — but the cache is injected into it via
+`ServiceConfig.replay_cache` so that it is **not**. This was audit finding M-1:
+before it, each request built its own empty cache, so no nonce was ever seen
+twice and the control did nothing in the default deployment.
+
+**There is no restart persistence, and none is claimed.** A restart empties the
+cache, so a captured request stays replayable for the remainder of its freshness
+window (default five minutes). Bounding that window is the mitigation; a
+persistent nonce store is not implemented. Anyone requiring replay resistance
+across restarts must shorten `max_request_age` or add persistence — the current
+protocol does not provide it.
+
+### Concurrency
+
+`ReplayCache.remember` performs eviction, membership check and insert under one
+lock, as a single atomic operation. The two halves are only a control together:
+between a bare check and a bare insert, a second thread bearing the same nonce
+would also see "not seen". A test releases 32 threads simultaneously on one
+nonce and asserts exactly one is admitted.
+
+### Bounds
+
+Retention is bounded twice. Expiry is the ordinary mechanism — a nonce is
+dropped once a request carrying it would be refused as stale anyway. A hard
+ceiling (`ReplayCache.DEFAULT_MAX_ENTRIES`, 100 000) bounds memory by
+construction rather than by an assumption about traffic.
+
+At the ceiling the cache **refuses rather than evicting a live nonce**, raising
+`ReplayCacheFull`, which the service turns into a refusal. Forgetting an
+unexpired nonce to make room would silently re-open its replay window; a refused
+legitimate request is recoverable, an accepted replay is not.
+
 ## Transports
 
 | Transport | Isolation | Use |

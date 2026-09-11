@@ -34,6 +34,7 @@ import datetime as _dt
 import hmac
 import logging
 import os
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -113,39 +114,87 @@ class AuthenticationError(Exception):
     """Raised when a request's integrity or authenticity cannot be established."""
 
 
+class ReplayCacheFull(Exception):
+    """Raised when the cache cannot admit a nonce without forgetting a live one.
+
+    Forgetting a live nonce would silently re-open the replay window for it, so
+    the cache refuses instead. Fail-closed: a refused legitimate request is
+    recoverable, an accepted replay is not.
+    """
+
+
 class ReplayCache:
     """Remembers recently seen nonces so a captured request cannot be replayed.
 
-    Scoped to the same window the validator uses for freshness: a nonce older
-    than that window need not be remembered, because the request carrying it is
-    refused as stale anyway. Keeping the two numbers equal is what makes the
-    memory bounded without opening a gap between them.
+    **Lifetime is the security property.** This object must outlive individual
+    requests. A cache constructed per request remembers nothing and refuses
+    nothing - which is precisely the defect audit finding M-1 recorded. The API
+    therefore holds one on ``app.state`` for the life of the application; see
+    ``get_privileged_client``.
+
+    Retention is scoped to the same window the validator uses for freshness: a
+    nonce older than that window need not be remembered, because a request
+    carrying it is refused as stale anyway. Keeping the two numbers equal is what
+    bounds the memory without opening a gap between them.
+
+    Thread-safe. ``remember`` is a single atomic check-and-insert under a lock,
+    because the two halves are only a security control together: between a bare
+    check and a bare insert, a second thread bearing the same nonce would also
+    see "not seen".
     """
 
-    def __init__(self, window: _dt.timedelta = DEFAULT_MAX_REQUEST_AGE) -> None:
+    #: Hard ceiling on retained nonces. With the default five-minute window this
+    #: is roughly 300 requests per second sustained before the bound is reached,
+    #: far above anything this workload produces - so in practice the expiry
+    #: sweep, not this, is what bounds the cache. It exists so that memory is
+    #: bounded by construction rather than by an assumption about traffic.
+    DEFAULT_MAX_ENTRIES: Final = 100_000
+
+    def __init__(
+        self,
+        window: _dt.timedelta = DEFAULT_MAX_REQUEST_AGE,
+        *,
+        max_entries: int = DEFAULT_MAX_ENTRIES,
+    ) -> None:
         self._window = window
+        self._max_entries = max_entries
         self._seen: dict[str, _dt.datetime] = {}
+        self._lock = threading.Lock()
 
     def remember(self, nonce: str, *, now: _dt.datetime | None = None) -> bool:
-        """Record a nonce. Returns False if it has already been used.
+        """Record a nonce atomically. Returns False if it has already been used.
 
-        The check and the insert happen together so two requests bearing one
-        nonce cannot both be accepted.
+        The eviction sweep, the membership check and the insert all happen under
+        one lock, so two concurrent requests bearing one nonce cannot both be
+        accepted: exactly one sees it as new.
+
+        Raises :class:`ReplayCacheFull` when the cache is at capacity after
+        evicting everything expired.
         """
         current = now or _dt.datetime.now(_dt.timezone.utc)
-        self._evict(current)
-        if nonce in self._seen:
-            return False
-        self._seen[nonce] = current + self._window
-        return True
+        with self._lock:
+            self._evict(current)
+            if nonce in self._seen:
+                return False
+            if len(self._seen) >= self._max_entries:
+                raise ReplayCacheFull(
+                    f"The replay cache holds {len(self._seen)} unexpired nonces, "
+                    f"its limit of {self._max_entries}. Admitting another would "
+                    "mean forgetting one that is still live, which would re-open "
+                    "its replay window."
+                )
+            self._seen[nonce] = current + self._window
+            return True
 
     def _evict(self, now: _dt.datetime) -> None:
+        """Drop expired nonces. Caller must hold the lock."""
         expired = [nonce for nonce, until in self._seen.items() if until <= now]
         for nonce in expired:
             del self._seen[nonce]
 
     def __len__(self) -> int:
-        return len(self._seen)
+        with self._lock:
+            return len(self._seen)
 
 
 class RequestAuthenticator:
@@ -239,6 +288,13 @@ class ServiceConfig:
     operation_timeout_seconds: float = DEFAULT_OPERATION_TIMEOUT_SECONDS
     max_request_age: _dt.timedelta = DEFAULT_MAX_REQUEST_AGE
 
+    #: The nonce cache to use. Supplying one lets a host keep replay protection
+    #: alive across many short-lived service objects, which is what the HTTP
+    #: deployment needs: the service is cheap to rebuild per request, but a
+    #: cache rebuilt per request remembers nothing. Left unset, the service owns
+    #: a private cache and replay protection lasts exactly as long as it does.
+    replay_cache: ReplayCache | None = None
+
 
 class PrivilegedService:
     """Dispatches allowlisted operations after deciding for itself.
@@ -254,7 +310,16 @@ class PrivilegedService:
         self._validator = PrivilegedRequestValidator(
             config.validator, max_request_age=config.max_request_age
         )
-        self._replay = ReplayCache(config.max_request_age)
+        # `is not None`, never `or`: ReplayCache defines __len__, so an empty
+        # cache is falsy, and `config.replay_cache or ReplayCache(...)` would
+        # silently discard an injected-but-empty cache and build a private one -
+        # reintroducing M-1 in the exact case that matters, the first request
+        # after startup.
+        self._replay = (
+            config.replay_cache
+            if config.replay_cache is not None
+            else ReplayCache(config.max_request_age)
+        )
         self._analyzer = TargetAnalyzer(config.validator)
         self._profiler = StorageProfiler()
         self._emitter = EngineEventEmitter()
@@ -365,7 +430,15 @@ class PrivilegedService:
             )
             return self._refuse(request, (str(exc),))
 
-        if not self._replay.remember(request.nonce, now=now):
+        try:
+            fresh_nonce = self._replay.remember(request.nonce, now=now)
+        except ReplayCacheFull as exc:
+            # Refusing work is the safe direction. The alternative - evicting a
+            # live nonce to make room - would silently re-open its replay window.
+            logger.error("privileged.replay_cache.full operation=%s", request.operation.value)
+            return self._refuse(request, (str(exc),))
+
+        if not fresh_nonce:
             logger.warning(
                 "privileged.request.rejected reason=replay operation=%s",
                 request.operation.value,
@@ -560,12 +633,19 @@ class PrivilegedService:
 def build_service_from_env(
     validator: SafePathValidator,
     env: dict[str, str] | None = None,
+    *,
+    replay_cache: ReplayCache | None = None,
 ) -> PrivilegedService:
     """Construct a service from process configuration.
 
     Every secret is read here, from this process's environment. A service built
     this way with nothing configured is UNAVAILABLE and refuses work - which is
     the correct behaviour, and is asserted by the test suite.
+
+    ``replay_cache`` lets a host that rebuilds the service frequently - the HTTP
+    API does, once per request - keep one cache alive across all of them. Omit
+    it and the service owns a private cache, which is correct only when the
+    service itself is long-lived.
     """
     source = env if env is not None else dict(os.environ)
 
@@ -587,5 +667,6 @@ def build_service_from_env(
             authenticator=RequestAuthenticator.from_env(source),
             vault_root=source.get(ENV_VAULT_ROOT) or None,
             vault_key=vault_key,
+            replay_cache=replay_cache,
         )
     )

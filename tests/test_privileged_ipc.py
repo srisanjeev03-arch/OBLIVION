@@ -20,9 +20,11 @@ import datetime as _dt
 import inspect
 import secrets
 import sys
+from pathlib import Path
 
 import pytest
 
+from oblivion.core.safety.paths import SafePathValidator
 from oblivion.privileged import (
     DESTRUCTIVE_OPERATIONS,
     InProcessTransport,
@@ -43,7 +45,7 @@ from oblivion.privileged import protocol as protocol_module
 from oblivion.privileged import service as service_module
 from oblivion.privileged import transport as transport_module
 from oblivion.privileged import validation as validation_module
-from oblivion.privileged.service import CapabilityState
+from oblivion.privileged.service import CapabilityState, ReplayCacheFull
 
 SELECTIVE_POLICY = "ERASURE.LOGICAL.SELECTIVE.V1"
 TREE_POLICY = "ERASURE.LOGICAL.TREE.V1"
@@ -458,6 +460,94 @@ def test_a_request_dated_in_the_future_is_refused(service, authenticator, temp_d
     )
     response = service.handle(request, authenticator.sign(request))
     assert response.status is ResponseStatus.REFUSED
+
+
+def test_only_one_of_many_concurrent_threads_may_claim_a_nonce():
+    """check-and-insert is atomic, so a race cannot admit the same nonce twice.
+
+    A barrier releases every thread at once, which is what makes this a real
+    race rather than a sequence that happens to interleave. Without the lock,
+    several threads would see "not seen" between the check and the insert.
+    """
+    import threading
+
+    cache = ReplayCache()
+    thread_count = 32
+    barrier = threading.Barrier(thread_count)
+    results: list[bool] = []
+    guard = threading.Lock()
+
+    def claim() -> None:
+        barrier.wait()
+        outcome = cache.remember("contended-nonce")
+        with guard:
+            results.append(outcome)
+
+    threads = [threading.Thread(target=claim) for _ in range(thread_count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert len(results) == thread_count
+    assert sum(1 for r in results if r) == 1, (
+        "exactly one thread may record the nonce; the rest must see a replay"
+    )
+    assert len(cache) == 1
+
+
+def test_the_cache_refuses_rather_than_forgetting_a_live_nonce():
+    """At capacity it fails closed.
+
+    Evicting an unexpired nonce to make room would silently re-open its replay
+    window, which is worse than refusing work.
+    """
+    cache = ReplayCache(max_entries=3)
+    for index in range(3):
+        assert cache.remember(f"n{index}") is True
+
+    with pytest.raises(ReplayCacheFull, match="still live"):
+        cache.remember("one-too-many")
+
+    # And the nonces it already holds are still refused as replays.
+    assert cache.remember("n0") is False
+
+
+def test_capacity_is_reclaimed_once_entries_expire():
+    """The bound is a ceiling on *live* nonces, not a permanent limit."""
+    cache = ReplayCache(_dt.timedelta(minutes=5), max_entries=2)
+    now = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc)
+
+    assert cache.remember("a", now=now) is True
+    assert cache.remember("b", now=now) is True
+    with pytest.raises(ReplayCacheFull):
+        cache.remember("c", now=now)
+
+    later = now + _dt.timedelta(minutes=10)
+    assert cache.remember("c", now=later) is True
+
+
+def test_an_injected_cache_is_used_even_when_empty():
+    """Regression guard for a truthiness bug found while fixing M-1.
+
+    ``ReplayCache`` defines ``__len__``, so an empty cache is falsy. Selecting it
+    with ``or`` silently discarded the injected cache and built a private one -
+    which reintroduced M-1 in exactly the case that matters, the first request
+    after startup, while every test still passed.
+    """
+    shared = ReplayCache()
+    assert len(shared) == 0
+    assert not shared, "an empty cache is falsy; that is what made `or` unsafe"
+
+    validator = SafePathValidator(allowed_roots=[str(Path.cwd())])
+    service = PrivilegedService(
+        ServiceConfig(
+            validator=validator,
+            authenticator=RequestAuthenticator(bytes.fromhex(secrets.token_hex(32))),
+            replay_cache=shared,
+        )
+    )
+    assert service._replay is shared
 
 
 def test_replay_cache_forgets_nonces_once_they_can_no_longer_be_used():

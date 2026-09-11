@@ -72,6 +72,87 @@ class OperationStateOut(str, Enum):
     CANCELLED = "CANCELLED"
 
 
+class CoverageState(str, Enum):
+    """How much of a supported analysis actually ran.
+
+    The distinction between `PARTIAL` and `PERFORMED` is the point: before it
+    existed, "one of several recovery methods ran" and "every supported method
+    ran" were reported identically, and a client could not tell them apart.
+    """
+
+    #: Never attempted.
+    NOT_PERFORMED = "NOT_PERFORMED"
+    #: Attempted, but nothing this build supports could run here.
+    UNAVAILABLE = "UNAVAILABLE"
+    #: Ran but reached no determination.
+    INCONCLUSIVE = "INCONCLUSIVE"
+    #: Ran, but did not cover every method or scanner this build supports.
+    PARTIAL = "PARTIAL"
+    #: Every supported method or scanner ran. Complete coverage *of what this
+    #: build supports* - never a claim that unsupported techniques were applied.
+    PERFORMED = "PERFORMED"
+
+
+class RecoveryMethodCoverageOut(BaseModel):
+    """Which recovery methods ran, and what each one did.
+
+    Named lists rather than counts, so a client can render exactly which
+    techniques were and were not applied instead of inferring it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    supported: list[str] = Field(
+        default_factory=list, description="Methods this build can perform at all."
+    )
+    attempted: list[str] = Field(default_factory=list)
+    successful: list[str] = Field(
+        default_factory=list,
+        description="Methods that recovered the data. Non-empty means recoverable.",
+    )
+    failed: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Methods that ran and did not recover the data. Evidence about those "
+            "methods only - never evidence of irrecoverability."
+        ),
+    )
+    unavailable: list[str] = Field(
+        default_factory=list,
+        description="Methods never attempted, because this build cannot perform them.",
+    )
+
+
+class ResidualScannerCoverageOut(BaseModel):
+    """Which residual scanners ran."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    supported: list[str] = Field(default_factory=list)
+    ran: list[str] = Field(default_factory=list)
+    inconclusive: list[str] = Field(default_factory=list)
+    unavailable: list[str] = Field(default_factory=list)
+
+
+class CoverageOut(BaseModel):
+    """What was actually searched.
+
+    Present so no client ever has to infer coverage from an empty findings list
+    or a single boolean.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    residual_analysis: CoverageState = CoverageState.NOT_PERFORMED
+    recovery_test: CoverageState = CoverageState.NOT_PERFORMED
+    recovery_methods: RecoveryMethodCoverageOut = Field(
+        default_factory=RecoveryMethodCoverageOut
+    )
+    residual_scanners: ResidualScannerCoverageOut = Field(
+        default_factory=ResidualScannerCoverageOut
+    )
+
+
 class PipelineStageOut(BaseModel):
     """One stage, and what it established."""
 
@@ -109,6 +190,15 @@ class PipelineResultOut(BaseModel):
 
     assurance_status: AssuranceStatusOut | None = None
     verification_status: VerificationStatusOut | None = None
+
+    coverage: CoverageOut = Field(
+        default_factory=CoverageOut,
+        description=(
+            "What was actually searched. Read this alongside `assurance_status`: "
+            "PASSED with PARTIAL recovery coverage means no artifacts were found "
+            "by the methods that ran, not that every method was tried."
+        ),
+    )
 
     limitations: list[str] = Field(
         default_factory=list,

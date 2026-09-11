@@ -16,6 +16,7 @@ from oblivion.api.routes import (
     recovery_router,
     targets_router,
 )
+from oblivion.privileged.service import ReplayCache
 
 
 def create_app() -> FastAPI:
@@ -25,6 +26,19 @@ def create_app() -> FastAPI:
         version="0.1.0",
         description="Backend API for controlled data erasure, recovery, residual analysis, assurance and certificate verification.",
     )
+
+    # One nonce cache for the life of this application.
+    #
+    # Replay protection is only a control if the cache outlives the request. The
+    # privileged service itself is rebuilt per request - it is cheap, and its
+    # validator must track configuration - but a cache rebuilt alongside it
+    # remembers nothing and refuses nothing. That was audit finding M-1.
+    #
+    # It lives on app.state rather than in a module-level global so that its
+    # lifetime is exactly the application object's: two apps in one process
+    # (as the tests create) get two independent caches, and nothing outlives
+    # the app that owns it.
+    app.state.privileged_replay_cache = ReplayCache()
 
     # CORS configuration - restricted origins, no wildcard with credentials
     cors_origins = os.environ.get("OBLIVION_CORS_ORIGINS", "http://localhost:3000")

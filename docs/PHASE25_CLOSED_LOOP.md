@@ -88,6 +88,62 @@ that.
 degrades coverage rather than contributing to "nothing was found". Coverage is
 `PERFORMED` only when every scanner ran.
 
+## Coverage vocabulary
+
+One word, one meaning, used identically by the residual sweep and by recovery
+testing. Audit finding M-2 was that `PERFORMED` previously meant "every scanner
+ran" on one side and "at least one method was attempted" on the other.
+
+| State | Meaning |
+|---|---|
+| `NOT_PERFORMED` | Never attempted |
+| `UNAVAILABLE` | Attempted, but nothing this build supports could run here |
+| `INCONCLUSIVE` | Ran but reached no determination |
+| `PARTIAL` | Ran, but did not cover every supported method or scanner |
+| `PERFORMED` | **Every unit of work this build supports** ran |
+
+`PERFORMED` is complete coverage *of what this build supports*. It is never a
+claim that unsupported techniques were applied — those are limitations, listed
+by name in every report and never folded into the state.
+
+**Recovery coverage** is measured against the methods this build can actually
+perform (`filesystem_enumeration`, and `vault_round_trip` when a vault object is
+probed). The five permanently-unavailable forensic methods are not gaps this
+operation could have closed, so they do not drag coverage down — but they are
+enumerated in `method_coverage.unavailable` on every result.
+
+**Residual coverage** is measured against the four scanners, all of which are
+supported; one that cannot run makes the sweep `PARTIAL`.
+
+### What is recorded, not inferred
+
+Neither report reduces to a boolean. Each carries named lists:
+
+- `recovery_report.method_coverage` → `supported`, `attempted`, `successful`,
+  `failed`, `unavailable`
+- `residual_report.scanner_coverage` → `supported`, `ran`, `inconclusive`,
+  `unavailable`
+
+"Recovery testing was performed" is not a fact anyone can check.
+"`filesystem_enumeration` ran and found nothing; five other methods were never
+attempted" is.
+
+### How assurance reads partial coverage
+
+| Coverage | Assurance |
+|---|---|
+| Any required analysis `NOT_PERFORMED`, `UNAVAILABLE` or `INCONCLUSIVE` | `INCONCLUSIVE` — nothing to reason from |
+| Any required analysis `PARTIAL` | **`PARTIAL`** — real evidence, incomplete search |
+| All `PERFORMED`, non-critical residual findings present | `PARTIAL` |
+| All `PERFORMED`, nothing found | `PASSED` |
+
+A conclusive negative still overrides everything: a recovery method that
+*recovered* the data, or a critical residual finding, yields `FAILED` regardless
+of how complete the search was.
+
+`PARTIAL` exists because discarding a genuine but incomplete search as
+inconclusive would be as wrong as calling it `PASSED`.
+
 ### Residual limitations
 
 Not performed, and reported as limitations on every operation:

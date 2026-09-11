@@ -71,7 +71,17 @@ class AnalysisState(Enum):
     UNAVAILABLE = auto()
     #: Ran, but could not reach a determination.
     INCONCLUSIVE = auto()
-    #: Ran and produced a determination that can be relied upon.
+    #: Some of the units of work this build supports ran; others did not.
+    #:
+    #: Added for audit finding M-2. Before it, "one of several methods ran" and
+    #: "every method ran" were both reported as PERFORMED, which let a reader
+    #: overestimate forensic coverage. PARTIAL says plainly that the search was
+    #: real but incomplete - which is neither a clean result nor an absent one.
+    PARTIAL = auto()
+    #: Every unit of work this build supports ran and produced a determination
+    #: that can be relied upon. Complete coverage *of what is supported* - the
+    #: capabilities this build does not have are reported as limitations, never
+    #: folded into this state.
     PERFORMED = auto()
 
 
@@ -100,8 +110,27 @@ class EvidenceCoverage:
             if getattr(self, name) is not AnalysisState.PERFORMED
         ]
 
+    def blocking_shortfalls(self) -> list[tuple[str, "AnalysisState"]]:
+        """Shortfalls that prevent any positive verdict at all.
+
+        A required analysis that never ran, could not run, or reached no
+        determination leaves nothing to reason from. These are distinct from
+        :meth:`partial_shortfalls`, where a real search happened but did not
+        cover everything - that supports a qualified verdict, not no verdict.
+        """
+        blocking = {
+            AnalysisState.NOT_PERFORMED,
+            AnalysisState.UNAVAILABLE,
+            AnalysisState.INCONCLUSIVE,
+        }
+        return [(n, s) for n, s in self.shortfalls() if s in blocking]
+
+    def partial_shortfalls(self) -> list[tuple[str, "AnalysisState"]]:
+        """Required analyses that ran, but did not cover everything supported."""
+        return [(n, s) for n, s in self.shortfalls() if s is AnalysisState.PARTIAL]
+
     def is_complete(self) -> bool:
-        """True only when every required analysis actually ran."""
+        """True only when every required analysis ran to full supported coverage."""
         return not self.shortfalls()
 
 

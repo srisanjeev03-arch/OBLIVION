@@ -27,6 +27,7 @@ from oblivion.api.dependencies import (
 )
 from oblivion.api.schemas.pipeline import (
     AssuranceStatusOut,
+    CoverageOut,
     OperationStateOut,
     PipelineResultOut,
     PipelineStage,
@@ -166,6 +167,9 @@ async def run_pipeline(
             if result.verification_status is not None
             else None
         ),
+        coverage=CoverageOut.model_validate(result.coverage)
+        if result.coverage
+        else CoverageOut(),
         limitations=result.limitations,
         privilege_isolated=privileged.isolated,
     )

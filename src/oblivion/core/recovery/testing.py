@@ -163,13 +163,62 @@ class RecoveryTestReport:
         return None
 
     @property
+    def supported(self) -> list[MethodOutcome]:
+        """Methods this build can actually perform.
+
+        The permanently-unavailable methods in :data:`UNAVAILABLE_METHODS` are
+        not failures of this run - this build cannot do them at all. Coverage is
+        therefore measured against what *is* supported, and the rest are
+        reported as limitations rather than counted as gaps this operation could
+        have closed.
+        """
+        return [o for o in self.outcomes if o.method not in UNAVAILABLE_METHODS]
+
+    @property
     def coverage(self) -> AnalysisState:
-        """Whether recovery testing ran well enough to support a conclusion."""
+        """Whether recovery testing ran well enough to support a conclusion.
+
+        ``PERFORMED`` means **every supported method ran** - the same thing the
+        residual sweep's ``PERFORMED`` means. Before audit finding M-2 this
+        returned ``PERFORMED`` when *any* single method had been attempted,
+        which used the same word for "one of several" and "all of them" and let
+        a reader overestimate forensic coverage.
+
+        Methods this build cannot perform never appear here; they are
+        limitations, and they are listed in every report.
+        """
         if not self.outcomes:
             return AnalysisState.NOT_PERFORMED
-        if not self.attempted:
+
+        states = {o.state for o in self.supported}
+        if not states:
+            # Nothing supported was even offered - there is no recovery testing
+            # capability in play at all.
             return AnalysisState.UNAVAILABLE
-        return AnalysisState.PERFORMED
+        if states == {AnalysisState.PERFORMED}:
+            return AnalysisState.PERFORMED
+        if AnalysisState.PERFORMED in states or AnalysisState.INCONCLUSIVE in states:
+            return AnalysisState.PARTIAL
+        return AnalysisState.UNAVAILABLE
+
+    @property
+    def method_coverage(self) -> dict[str, list[str]]:
+        """Every method, sorted by what actually happened to it.
+
+        Recorded so that evidence preserves *which* methods ran rather than a
+        single boolean. "Recovery testing was performed" is not a fact anyone can
+        check; "filesystem_enumeration ran and found nothing, five other methods
+        were never attempted" is.
+        """
+        return {
+            "supported": [o.method.value for o in self.supported],
+            "attempted": [o.method.value for o in self.attempted],
+            "successful": [
+                o.method.value for o in self.attempted if o.recovered is True
+            ],
+            "failed": [o.method.value for o in self.attempted if o.recovered is False],
+            "unavailable": [o.method.value for o in self.not_attempted],
+        }
 
     def to_assurance_results(self) -> list[RecoveryTestResult]:
         """Translate into what the assurance engine consumes.
@@ -198,6 +247,7 @@ class RecoveryTestReport:
     def to_dict(self) -> dict[str, Any]:
         return {
             "coverage": self.coverage.name,
+            "method_coverage": self.method_coverage,
             "data_was_recovered": self.data_was_recovered,
             "methods": [
                 {

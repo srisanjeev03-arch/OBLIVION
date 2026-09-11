@@ -861,6 +861,44 @@ components:
       required:
       - acknowledged_risk
       title: ConfirmationInput
+    CoverageOut:
+      properties:
+        residual_analysis:
+          $ref: '#/components/schemas/CoverageState'
+          default: NOT_PERFORMED
+        recovery_test:
+          $ref: '#/components/schemas/CoverageState'
+          default: NOT_PERFORMED
+        recovery_methods:
+          $ref: '#/components/schemas/RecoveryMethodCoverageOut'
+        residual_scanners:
+          $ref: '#/components/schemas/ResidualScannerCoverageOut'
+      additionalProperties: false
+      type: object
+      title: CoverageOut
+      description: 'What was actually searched.
+
+
+        Present so no client ever has to infer coverage from an empty findings list
+
+        or a single boolean.'
+    CoverageState:
+      type: string
+      enum:
+      - NOT_PERFORMED
+      - UNAVAILABLE
+      - INCONCLUSIVE
+      - PARTIAL
+      - PERFORMED
+      title: CoverageState
+      description: 'How much of a supported analysis actually ran.
+
+
+        The distinction between `PARTIAL` and `PERFORMED` is the point: before it
+
+        existed, "one of several recovery methods ran" and "every supported method
+
+        ran" were reported identically, and a client could not tell them apart.'
     CreateOperationRequest:
       properties:
         target_id:
@@ -1172,6 +1210,10 @@ components:
           anyOf:
           - $ref: '#/components/schemas/VerificationStatusOut'
           - type: 'null'
+        coverage:
+          $ref: '#/components/schemas/CoverageOut'
+          description: 'What was actually searched. Read this alongside `assurance_status`: PASSED with PARTIAL
+            recovery coverage means no artifacts were found by the methods that ran, not that every method was tried.'
         limitations:
           items:
             type: string
@@ -1263,6 +1305,47 @@ components:
           default: 86400
       type: object
       title: RecoveryConfig
+    RecoveryMethodCoverageOut:
+      properties:
+        supported:
+          items:
+            type: string
+          type: array
+          title: Supported
+          description: Methods this build can perform at all.
+        attempted:
+          items:
+            type: string
+          type: array
+          title: Attempted
+        successful:
+          items:
+            type: string
+          type: array
+          title: Successful
+          description: Methods that recovered the data. Non-empty means recoverable.
+        failed:
+          items:
+            type: string
+          type: array
+          title: Failed
+          description: Methods that ran and did not recover the data. Evidence about those methods only - never
+            evidence of irrecoverability.
+        unavailable:
+          items:
+            type: string
+          type: array
+          title: Unavailable
+          description: Methods never attempted, because this build cannot perform them.
+      additionalProperties: false
+      type: object
+      title: RecoveryMethodCoverageOut
+      description: 'Which recovery methods ran, and what each one did.
+
+
+        Named lists rather than counts, so a client can render exactly which
+
+        techniques were and were not applied instead of inferring it.'
     RecoveryObjectOut:
       properties:
         id:
@@ -1299,6 +1382,32 @@ components:
       - operation_id
       - original_sha256
       title: RecoveryObjectOut
+    ResidualScannerCoverageOut:
+      properties:
+        supported:
+          items:
+            type: string
+          type: array
+          title: Supported
+        ran:
+          items:
+            type: string
+          type: array
+          title: Ran
+        inconclusive:
+          items:
+            type: string
+          type: array
+          title: Inconclusive
+        unavailable:
+          items:
+            type: string
+          type: array
+          title: Unavailable
+      additionalProperties: false
+      type: object
+      title: ResidualScannerCoverageOut
+      description: Which residual scanners ran.
     RestoreRequest:
       properties:
         destination:

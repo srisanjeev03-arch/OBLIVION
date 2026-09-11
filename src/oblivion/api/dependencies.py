@@ -26,7 +26,11 @@ from oblivion.persistence.models.operation import OperationEventModel
 from oblivion.persistence.models.user import UserModel
 from oblivion.persistence.repositories.user_repo import UserRepository
 from oblivion.privileged.client import PrivilegedClient
-from oblivion.privileged.service import RequestAuthenticator, build_service_from_env
+from oblivion.privileged.service import (
+    ReplayCache,
+    RequestAuthenticator,
+    build_service_from_env,
+)
 from oblivion.privileged.transport import (
     InProcessTransport,
     NamedPipeTransport,
@@ -271,10 +275,44 @@ def get_trust_store() -> TrustStore:
         )
 
 
+def get_replay_cache(request: Request) -> ReplayCache:
+    """The application's nonce cache.
+
+    Raises rather than quietly creating one. A missing cache would mean the app
+    was built by something other than ``create_app`` - and silently handing back
+    a fresh cache would restore exactly the defect M-1 describes, while looking
+    like it worked.
+    """
+    cache = getattr(request.app.state, "privileged_replay_cache", None)
+    if not isinstance(cache, ReplayCache):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error_code": "REPLAY_CACHE_UNAVAILABLE",
+                "message": (
+                    "No application-scoped replay cache is configured, so replay "
+                    "protection could not be enforced. Refusing rather than "
+                    "proceeding without it."
+                ),
+            },
+        )
+    return cache
+
+
 def get_privileged_client(
+    request: Request,
     validator: SafePathValidator = Depends(get_safe_validator),
 ) -> PrivilegedClient:
     """The handle on the privileged service, or a clear 503.
+
+    The service object is rebuilt per request - it is cheap, and its validator
+    must reflect current configuration - but the **nonce cache is not**. It is
+    taken from ``app.state``, where it lives for the life of the application.
+
+    That split is the fix for audit finding M-1: this dependency previously let
+    each request's service construct its own cache, so every request started
+    with an empty one and no nonce was ever seen twice. Replay protection is
+    only a control if the memory outlives the request being checked.
 
     Two transports, chosen by configuration rather than guessed:
 
@@ -306,9 +344,15 @@ def get_privileged_client(
     pipe_name = os.environ.get("OBLIVION_PRIVILEGED_PIPE")
     transport: Transport
     if pipe_name:
+        # The privileged host owns its own long-lived service and cache; this
+        # process only speaks to it.
         transport = NamedPipeTransport(pipe_name)
     else:
-        transport = InProcessTransport(build_service_from_env(validator))
+        transport = InProcessTransport(
+            build_service_from_env(
+                validator, replay_cache=get_replay_cache(request)
+            )
+        )
 
     return PrivilegedClient(transport, authenticator)
 

@@ -163,6 +163,13 @@ class PipelineResult:
     limitations: list[str] = field(default_factory=list)
     final_state: str = State.CREATED.name
 
+    #: What was actually searched, per analysis and per method/scanner.
+    #:
+    #: Carried explicitly so a client never has to infer coverage from an empty
+    #: findings list or a single boolean - which is what audit finding M-2 was
+    #: about. Empty only when the pipeline stopped before coverage was computed.
+    coverage: dict[str, Any] = field(default_factory=dict)
+
     def outcome(self, stage: Stage) -> StageOutcome | None:
         for entry in self.stages:
             if entry.stage is stage:
@@ -185,6 +192,7 @@ class PipelineResult:
             "assurance_status": self.assurance_status,
             "verification_status": self.verification_status,
             "limitations": list(self.limitations),
+            "coverage": dict(self.coverage),
         }
 
 
@@ -280,6 +288,22 @@ class ClosedLoopPipeline:
                 else AnalysisState.NOT_PERFORMED
             ),
         )
+
+        # Record what was actually searched, not merely that something was.
+        result.coverage = {
+            "residual_analysis": coverage.residual_analysis.name,
+            "recovery_test": coverage.recovery_test.name,
+            "recovery_methods": (
+                recovery_report.method_coverage
+                if recovery_report is not None
+                else {}
+            ),
+            "residual_scanners": (
+                residual_report.scanner_coverage
+                if residual_report is not None
+                else {}
+            ),
+        }
 
         assurance = self._assess(
             request, result, coverage, recovery_report, residual_report

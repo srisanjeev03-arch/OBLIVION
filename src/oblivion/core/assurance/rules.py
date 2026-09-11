@@ -30,6 +30,9 @@ _SHORTFALL_DESCRIPTION = {
     AnalysisState.NOT_PERFORMED: "was not performed",
     AnalysisState.UNAVAILABLE: "could not be performed in this environment",
     AnalysisState.INCONCLUSIVE: "ran but reached no determination",
+    AnalysisState.PARTIAL: (
+        "ran, but did not cover every method or scanner this build supports"
+    ),
 }
 
 
@@ -106,8 +109,14 @@ class DefaultAssuranceRule(AssuranceRule):
                 f"Critical residual artifacts found ({len(critical)}).",
             )
 
-        # 2. Coverage gate - no positive claim without a completed search.
-        shortfalls = coverage.shortfalls()
+        # 2. Coverage gate - no claim at all without a search that ran.
+        #
+        # Only *blocking* shortfalls land here: an analysis that never ran,
+        # could not run, or reached no determination leaves nothing to reason
+        # from. A partial search is handled further down, because it did produce
+        # evidence - just not complete evidence - and collapsing the two would
+        # make an incomplete search indistinguishable from an absent one.
+        shortfalls = coverage.blocking_shortfalls()
         if shortfalls:
             reasons = [
                 InconclusiveReason(
@@ -169,6 +178,36 @@ class DefaultAssuranceRule(AssuranceRule):
                         context={"test_id": r.test_id},
                     )
                     for r in inconclusive_tests
+                ],
+            )
+
+        # 3b. Partial coverage - a real search that did not cover everything.
+        #
+        # This is the M-2 distinction. The evidence is genuine, so the result is
+        # not inconclusive; but the search was incomplete, so it is not PASSED
+        # either. PARTIAL states exactly that, and names which analysis fell
+        # short so a reader knows what was and was not covered.
+        partial = coverage.partial_shortfalls()
+        if partial:
+            names = ", ".join(name.replace("_", " ") for name, _ in partial)
+            return RuleEvaluation(
+                AssuranceStatus.PARTIAL,
+                AssuranceConfidence.MEDIUM,
+                (
+                    "Assurance is partial: no artifacts were found, but coverage "
+                    f"was incomplete ({names}). This is not a claim that every "
+                    "supported check was carried out."
+                ),
+                [
+                    InconclusiveReason(
+                        reason_code=f"{name.upper()}_{state.name}",
+                        description=(
+                            f"{name.replace('_', ' ').capitalize()} "
+                            f"{_SHORTFALL_DESCRIPTION[state]}."
+                        ),
+                        context={"analysis": name, "state": state.name},
+                    )
+                    for name, state in partial
                 ],
             )
 

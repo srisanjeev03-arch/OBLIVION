@@ -527,6 +527,11 @@ class ResidualScanReport:
         ``PERFORMED`` only when every scanner ran. One scanner that could not run
         makes the sweep incomplete, and an incomplete sweep cannot support
         "nothing is there".
+
+        A sweep where some scanners ran is ``PARTIAL`` rather than
+        ``INCONCLUSIVE``: real evidence was gathered, just not all of it. That
+        distinction is what lets assurance say "partial" instead of either
+        overclaiming or discarding a genuine result - audit finding M-2.
         """
         if not self.outcomes:
             return AnalysisState.NOT_PERFORMED
@@ -534,12 +539,35 @@ class ResidualScanReport:
         if states == {AnalysisState.PERFORMED}:
             return AnalysisState.PERFORMED
         if AnalysisState.PERFORMED in states or AnalysisState.INCONCLUSIVE in states:
-            return AnalysisState.INCONCLUSIVE
+            return AnalysisState.PARTIAL
         return AnalysisState.UNAVAILABLE
+
+    @property
+    def scanner_coverage(self) -> dict[str, list[str]]:
+        """Which scanners ran and which did not, by name.
+
+        Preserved so a reader never has to infer coverage from the number of
+        findings. An empty findings list means nothing without this.
+        """
+        return {
+            "supported": [o.scanner for o in self.outcomes],
+            "ran": [
+                o.scanner for o in self.outcomes if o.state is AnalysisState.PERFORMED
+            ],
+            "inconclusive": [
+                o.scanner
+                for o in self.outcomes
+                if o.state is AnalysisState.INCONCLUSIVE
+            ],
+            "unavailable": [
+                o.scanner for o in self.outcomes if o.state is AnalysisState.UNAVAILABLE
+            ],
+        }
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "coverage": self.coverage.name,
+            "scanner_coverage": self.scanner_coverage,
             "scanners": [
                 {
                     "scanner": o.scanner,

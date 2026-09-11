@@ -25,6 +25,7 @@ from oblivion.certificate.trust_model import ENV_TRUSTED_SIGNERS
 from oblivion.core.state.machine import State
 from oblivion.persistence.database import get_session_factory, init_db
 from oblivion.persistence.repositories.operation_repo import OperationRepository
+from oblivion.privileged import client as client_module
 
 SELECTIVE_POLICY = "ERASURE.LOGICAL.SELECTIVE.V1"
 SIGNER_ID = "oblivion-issuer"
@@ -180,6 +181,48 @@ def test_the_response_states_whether_privilege_was_isolated(operator_client, tem
 
     body = operator_client.post(f"/api/operations/{operation_id}/pipeline").json()
     assert body["privilege_isolated"] is False
+
+
+def test_the_response_exposes_what_was_actually_searched(operator_client, temp_dir):
+    """Coverage is explicit on the wire, not inferable from an empty list.
+
+    Audit finding M-2: a client reading only `assurance_status` could not tell a
+    complete search from a single weak method. The coverage block names both the
+    per-analysis state and the individual methods and scanners.
+    """
+    target = temp_dir / "coverage.txt"
+    target.write_text("payload")
+    operation_id = create_operation(target)
+
+    body = operator_client.post(f"/api/operations/{operation_id}/pipeline").json()
+    coverage = body["coverage"]
+
+    assert coverage["residual_analysis"] in (
+        "NOT_PERFORMED",
+        "UNAVAILABLE",
+        "INCONCLUSIVE",
+        "PARTIAL",
+        "PERFORMED",
+    )
+    assert coverage["recovery_test"] in (
+        "NOT_PERFORMED",
+        "UNAVAILABLE",
+        "INCONCLUSIVE",
+        "PARTIAL",
+        "PERFORMED",
+    )
+
+    methods = coverage["recovery_methods"]
+    # The methods this build cannot perform are named, not silently omitted.
+    assert "mft_record" in methods["unavailable"]
+    assert "unallocated_carving" in methods["unavailable"]
+    assert "filesystem_enumeration" in methods["attempted"]
+    # Attempted is a strict subset of supported plus nothing invented.
+    assert set(methods["attempted"]) <= set(methods["supported"])
+    assert not set(methods["attempted"]) & set(methods["unavailable"])
+
+    scanners = coverage["residual_scanners"]
+    assert scanners["supported"], "scanner coverage must be reported by name"
 
 
 def test_limitations_travel_with_the_result(operator_client, temp_dir):
@@ -353,6 +396,124 @@ def test_without_a_signing_key_the_endpoint_refuses(
     assert response.status_code == 500
     assert response.json()["error_code"] == "SIGNING_KEY_UNAVAILABLE"
     assert target.exists()
+
+
+# ---------------------------------------------------------------------------
+# Replay protection, through the real HTTP dependency path (audit finding M-1)
+# ---------------------------------------------------------------------------
+
+
+class _ReplayableNonces:
+    """A deterministic nonce source that can be rewound.
+
+    Replaces ``new_nonce`` so a second HTTP request draws exactly the same
+    sequence the first one did. That is what makes a replay reproducible through
+    the real endpoint: the client mints nonces internally, so a test cannot
+    otherwise choose them.
+    """
+
+    def __init__(self) -> None:
+        self.index = 0
+
+    def __call__(self) -> str:
+        self.index += 1
+        return f"replaytest{self.index:04d}"
+
+    def rewind(self) -> None:
+        self.index = 0
+
+
+def test_the_replay_cache_is_shared_across_http_requests(operator_client, temp_dir):
+    """The application holds one cache, not one per request.
+
+    This is the direct statement of audit finding M-1. Before the fix the
+    dependency built a new service - and a new empty cache - for every request,
+    so the identity asserted here was false.
+    """
+    first = operator_client.app.state.privileged_replay_cache
+    target = temp_dir / "shared-cache.txt"
+    target.write_text("payload")
+    operator_client.post(f"/api/operations/{create_operation(target)}/pipeline")
+    second = operator_client.app.state.privileged_replay_cache
+
+    assert first is second
+    assert len(second) > 0, "the request should have recorded nonces in it"
+
+
+def test_a_replayed_nonce_is_refused_across_two_http_requests(
+    operator_client, temp_dir, monkeypatch
+):
+    """The end-to-end proof that replay protection survives the request boundary.
+
+    Request 1 runs normally and its nonces are recorded. The nonce source is then
+    rewound so request 2 presents the *same* nonces to the privileged service.
+    Every privileged call in request 2 must be refused as a replay - and, the
+    part that actually matters, its target must survive untouched.
+    """
+    nonces = _ReplayableNonces()
+    monkeypatch.setattr(client_module, "new_nonce", nonces)
+
+    first_target = temp_dir / "replay-first.txt"
+    first_target.write_text("payload one")
+    second_target = temp_dir / "replay-second.txt"
+    second_target.write_text("payload two")
+
+    # Request 1: ordinary, successful operation.
+    nonces.rewind()
+    first = operator_client.post(
+        f"/api/operations/{create_operation(first_target)}/pipeline"
+    )
+    assert first.status_code == 200
+    assert first.json()["final_state"] == "COMPLETED"
+    assert not first_target.exists()
+
+    # Request 2: same nonce sequence, different operation and target.
+    nonces.rewind()
+    second = operator_client.post(
+        f"/api/operations/{create_operation(second_target)}/pipeline"
+    )
+    assert second.status_code == 200
+    body = second.json()
+
+    stages = {s["stage"]: s for s in body["stages"]}
+    assert stages["ERASE"]["status"] == "REFUSED"
+    assert "Nonce has already been used" in stages["ERASE"]["detail"]
+
+    # The security-relevant outcome: nothing was destroyed by the replay.
+    assert second_target.exists()
+    assert second_target.read_text() == "payload two"
+    assert body["certificate_id"] is None
+    assert body["final_state"] != "COMPLETED"
+
+
+def test_a_fresh_nonce_still_works_after_a_replay_was_refused(
+    operator_client, temp_dir, monkeypatch
+):
+    """Replay refusal must not wedge the service for legitimate callers."""
+    nonces = _ReplayableNonces()
+    monkeypatch.setattr(client_module, "new_nonce", nonces)
+
+    first_target = temp_dir / "recover-first.txt"
+    first_target.write_text("one")
+    replay_target = temp_dir / "recover-replay.txt"
+    replay_target.write_text("two")
+    fresh_target = temp_dir / "recover-fresh.txt"
+    fresh_target.write_text("three")
+
+    nonces.rewind()
+    operator_client.post(f"/api/operations/{create_operation(first_target)}/pipeline")
+
+    nonces.rewind()  # replayed - must be refused
+    operator_client.post(f"/api/operations/{create_operation(replay_target)}/pipeline")
+    assert replay_target.exists()
+
+    # No rewind: the sequence continues into values never seen before.
+    fresh = operator_client.post(
+        f"/api/operations/{create_operation(fresh_target)}/pipeline"
+    )
+    assert fresh.status_code == 200
+    assert fresh.json()["final_state"] == "COMPLETED"
+    assert not fresh_target.exists()
 
 
 def test_no_private_key_material_appears_in_the_response(operator_client, temp_dir):
