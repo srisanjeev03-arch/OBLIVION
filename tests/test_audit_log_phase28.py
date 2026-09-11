@@ -119,13 +119,13 @@ def test_actor_provenance_is_recorded_distinctly():
 
 def test_actor_provenance_is_part_of_the_digest():
     """Re-labelling a claimed identity as authenticated must break the digest."""
-    base = dict(
-        audit_id=new_audit_id(),
-        sequence=1,
-        event_type=AuditEventType.AUTH_LOGIN_FAILED,
-        outcome=AuditOutcome.REFUSED,
-        occurred_at=datetime.now(UTC),
-    )
+    base = {
+        "audit_id": new_audit_id(),
+        "sequence": 1,
+        "event_type": AuditEventType.AUTH_LOGIN_FAILED,
+        "outcome": AuditOutcome.REFUSED,
+        "occurred_at": datetime.now(UTC),
+    }
     claimed = AuditRecord(actor=AuditActor.unauthenticated("alice"), **base)
     promoted = AuditRecord(actor=AuditActor.authenticated("alice", "ADMIN"), **base)
     assert claimed.digest() != promoted.digest()

@@ -19,12 +19,12 @@ from sqlalchemy.orm import Session
 
 from oblivion.api.dependencies import (
     get_db,
-    resolve_audit_actor,
     get_privileged_client,
     get_safe_validator,
     get_signing_key_manager,
     get_trust_store,
     require_permission,
+    resolve_audit_actor,
 )
 from oblivion.api.schemas.pipeline import (
     AssuranceStatusOut,
@@ -37,8 +37,8 @@ from oblivion.api.schemas.pipeline import (
     VerificationStatusOut,
 )
 from oblivion.certificate.keys import SigningKeyManager
-from oblivion.core.audit import AuditEventType, AuditLog, AuditOutcome
 from oblivion.certificate.trust_model import TrustStore
+from oblivion.core.audit import AuditEventType, AuditLog, AuditOutcome
 from oblivion.core.pipeline import ClosedLoopPipeline, PipelineRequest
 from oblivion.core.safety.paths import SafePathValidator
 from oblivion.core.state.machine import State
