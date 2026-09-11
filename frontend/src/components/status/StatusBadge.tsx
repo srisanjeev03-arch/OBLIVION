@@ -57,7 +57,14 @@ const screenIcons: Record<ScreenState, Icon> = {
 const operationIcons: Record<OperationState, Icon> = {
   CREATED: Circle,
   ANALYZING: Loader2,
+  // Waiting on a second actor: a hold, not progress and not a fault.
+  PENDING_APPROVAL: CircleDashed,
   READY: CircleDot,
+  RESIDUAL_ANALYSIS: Loader2,
+  // The process stopped and nobody has established what happened on disk.
+  // Deliberately a question glyph, never a failure or a success: both of those
+  // would assert something that has not been determined.
+  RECONCILIATION_REQUIRED: CircleHelp,
   ERASING: Loader2,
   VERIFYING: Loader2,
   RECOVERY_TEST: Loader2,

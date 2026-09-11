@@ -35,6 +35,10 @@ export type AuditEventPageOut = components['schemas']['AuditEventPageOut']
 export type AuditChainVerificationOut = components['schemas']['AuditChainVerificationOut']
 export type AuditLinkOut = components['schemas']['AuditLinkOut']
 
+/** The closed-loop pipeline result, straight from the generated contract. */
+export type PipelineResultOut = components['schemas']['PipelineResultOut']
+export type PipelineStageOut = components['schemas']['PipelineStageOut']
+
 /** Per-record link states, in escalating order of concern. */
 export const AUDIT_LINK_STATUSES = [
   'VALID_GENESIS',

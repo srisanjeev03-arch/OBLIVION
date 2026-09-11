@@ -1,6 +1,14 @@
 ﻿import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router'
-import { Activity, Ban, FileCheck2, AlertTriangle, RefreshCw } from 'lucide-react'
+import {
+  Activity,
+  Ban,
+  FileCheck2,
+  AlertTriangle,
+  RefreshCw,
+  ShieldCheck,
+  PlayCircle,
+} from 'lucide-react'
 import { PageHeader } from '@/components/shell/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/Dialog'
@@ -8,9 +16,16 @@ import { StatusBadge } from '@/components/status/StatusBadge'
 import { EvidenceId } from '@/features/evidence/components/EvidenceId'
 import { EvidenceChainViewer } from '@/features/evidence/components/EvidenceChainViewer'
 import { ErrorState, LoadingState } from '@/components/states'
-import { useOperationQuery, useOperationEventsQuery, useCancelOperationMutation } from '@/lib/api'
+import {
+  useOperationQuery,
+  useOperationEventsQuery,
+  useCancelOperationMutation,
+  useApproveOperationMutation,
+  useRunPipelineMutation,
+} from '@/lib/api'
 import { OPERATION_LIFECYCLE } from '@/lib/status'
 import { cn } from '@/lib/cn'
+import { PipelineResultPanel } from '../components/PipelineResultPanel'
 
 export function OperationDetail() {
   const { id } = useParams<{ id: string }>()
@@ -22,6 +37,8 @@ export function OperationDetail() {
   const { data: op, isLoading, isError, error, refetch } = useOperationQuery(id, { pollMs: 1500 })
   const { data: events } = useOperationEventsQuery(id)
   const cancelMutation = useCancelOperationMutation(id || '')
+  const approveMutation = useApproveOperationMutation(id || '')
+  const pipelineMutation = useRunPipelineMutation(id || '')
 
   const handleCancel = () => {
     cancelMutation.mutate(undefined, {
@@ -52,6 +69,32 @@ export function OperationDetail() {
         breadcrumbs={[{ label: 'Operations', href: '/operations' }, { label: id || 'Detail' }]}
         actions={
           <div className="flex items-center gap-2">
+            {/* Approval is offered only while the operation is actually awaiting
+                one. The button is a convenience, not the control: the backend
+                refuses a requester approving their own operation regardless of
+                what this console chooses to render. */}
+            {op?.state === 'PENDING_APPROVAL' && (
+              <Button
+                variant="outline"
+                size="sm"
+                leadingIcon={<ShieldCheck className="h-3.5 w-3.5" />}
+                loading={approveMutation.isPending}
+                onClick={() => approveMutation.mutate()}
+              >
+                Approve as Second Actor
+              </Button>
+            )}
+            {op?.state === 'READY' && (
+              <Button
+                variant="danger"
+                size="sm"
+                leadingIcon={<PlayCircle className="h-3.5 w-3.5" />}
+                loading={pipelineMutation.isPending}
+                onClick={() => pipelineMutation.mutate()}
+              >
+                Run Closed Loop (Destructive)
+              </Button>
+            )}
             {!isTerminal && (
               <Button
                 variant="danger"
@@ -99,6 +142,27 @@ export function OperationDetail() {
             onRetry={() => void refetch()}
           />
         )}
+
+        {/* A refused approval is the separation-of-duties rule working, not a
+            malfunction. It is surfaced as the backend's own message so the
+            operator learns why, and the same refusal is recorded in the audit
+            log even though this request rolled back. */}
+        {approveMutation.isError && (
+          <ErrorState
+            title="Approval refused"
+            error={approveMutation.error}
+            description="An operation must be approved by a principal other than the one who requested it."
+          />
+        )}
+
+        {pipelineMutation.isError && (
+          <ErrorState
+            title="The pipeline could not be run"
+            error={pipelineMutation.error}
+          />
+        )}
+
+        {pipelineMutation.data && <PipelineResultPanel result={pipelineMutation.data} />}
 
         {op && (
           <div className="space-y-6 motion-enter">

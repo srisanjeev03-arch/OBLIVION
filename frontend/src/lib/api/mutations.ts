@@ -12,6 +12,7 @@ import {
   queryKeys,
   type AuditChainVerificationOut,
   type CertificateVerificationOut,
+  type PipelineResultOut,
 } from './queries'
 import type {
   CreateOperationRequest,
@@ -57,6 +58,52 @@ export function useCreateOperationMutation() {
   return useMutation<Operation, ApiError, CreateOperationRequest>({
     mutationFn: gatedMutation<CreateOperationRequest, Operation>('operations.create'),
     retry: false,
+  })
+}
+
+/**
+ * POST /api/operations/{id}/approve — the second half of the duty split.
+ *
+ * The request carries no body. The approving identity comes from the authenticated session, so
+ * there is no field in which a caller could name someone else as the approver. The backend refuses
+ * a requester approving their own operation with 403, and that refusal is recorded in the audit log
+ * even though the request itself rolls back.
+ */
+export function useApproveOperationMutation(operationId: string) {
+  const qc = useQueryClient()
+  return useMutation<Operation, ApiError, void>({
+    mutationFn: () =>
+      gatedMutation<undefined, Operation>('operations.approve', {
+        operation_id: operationId,
+      })(undefined),
+    retry: false,
+    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.operation(operationId) }),
+  })
+}
+
+/**
+ * POST /api/operations/{id}/pipeline — the closed loop, and the destructive one.
+ *
+ * No request body, deliberately: target, mode, policy and approval are read from the persisted
+ * operation, so an approved erasure cannot be redirected at another path.
+ *
+ * A 200 does not mean the target was erased. It means the pipeline ran and reported what happened,
+ * which may be a refusal — callers must read `final_state` and the per-stage statuses rather than
+ * inferring success from the status code. A null `certificate_id` is a normal outcome.
+ */
+export function useRunPipelineMutation(operationId: string) {
+  const qc = useQueryClient()
+  return useMutation<PipelineResultOut, ApiError, void>({
+    mutationFn: () =>
+      gatedMutation<undefined, PipelineResultOut>('operations.pipeline', {
+        operation_id: operationId,
+      })(undefined),
+    retry: false,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.operation(operationId) })
+      void qc.invalidateQueries({ queryKey: queryKeys.operationEvents(operationId) })
+      void qc.invalidateQueries({ queryKey: ['oblivion', 'audit', 'events'] })
+    },
   })
 }
 

@@ -100,8 +100,30 @@ export const OPERATION_TERMINAL_ALTERNATIVES = [
   'CANCELLED',
 ] as const
 
+/**
+ * States the backend machine can report that are not stages of the happy path.
+ *
+ * These are deliberately kept out of `OPERATION_LIFECYCLE` - the stepper rail renders the
+ * documented ten-stage progression and should not grow a branch - but they must be *nameable*,
+ * because the backend really returns them:
+ *
+ * - `PENDING_APPROVAL` is where every newly created operation sits, waiting for a second actor.
+ *   The console previously had no case for it at all, so the most common state in the system was
+ *   unrenderable.
+ * - `RESIDUAL_ANALYSIS` is an alias the machine also emits alongside `RESIDUAL_SCAN`.
+ * - `RECONCILIATION_REQUIRED` means the process stopped mid-operation and nobody has yet
+ *   established what happened on disk. It is the most safety-critical state in the machine, and
+ *   rendering it as "unknown" would bury exactly the case that needs a human.
+ */
+export const OPERATION_NON_LINEAR_STATES = [
+  'PENDING_APPROVAL',
+  'RESIDUAL_ANALYSIS',
+  'RECONCILIATION_REQUIRED',
+] as const
+
 export const OPERATION_STATES = [
   ...OPERATION_LIFECYCLE,
+  ...OPERATION_NON_LINEAR_STATES,
   ...OPERATION_TERMINAL_ALTERNATIVES,
 ] as const
 export type OperationState = (typeof OPERATION_STATES)[number]
@@ -161,12 +183,36 @@ export const operationStateMeta: Readonly<Record<OperationState, StatusMeta>> = 
     description: 'Evidence is insufficient. Do not treat as success.',
   },
   CANCELLED: { label: 'Cancelled', tone: 'neutral', description: 'Cancelled by an operator.' },
+  PENDING_APPROVAL: {
+    label: 'Pending Approval',
+    tone: 'warning',
+    description:
+      'Awaiting approval by a principal other than the requester. Nothing has been destroyed.',
+  },
+  RESIDUAL_ANALYSIS: {
+    label: 'Residual Analysis',
+    tone: 'info',
+    description: 'Scanning for what the operation left behind.',
+  },
+  RECONCILIATION_REQUIRED: {
+    label: 'Reconciliation Required',
+    tone: 'danger',
+    description:
+      'The process stopped mid-operation. Whether data was destroyed has not been established — ' +
+      'this is neither a success nor a failure until someone looks.',
+  },
 }
 
 export const ACTIVE_OPERATION_STATES: ReadonlySet<OperationState> = new Set<OperationState>([
   'CREATED',
   'ANALYZING',
+  'PENDING_APPROVAL',
   'READY',
+  'RESIDUAL_ANALYSIS',
+  // Deliberately active, not terminal: an unreconciled operation still needs
+  // attention, and treating it as finished would close the case on a question
+  // nobody has answered.
+  'RECONCILIATION_REQUIRED',
   'ERASING',
   'VERIFYING',
   'RECOVERY_TEST',
