@@ -5,7 +5,7 @@ This module re-derives every safety-relevant fact from the privileged process's
 own configuration and the live filesystem, because a boundary that trusts the
 caller's word about containment, policy or target identity is not a boundary.
 
-The check order follows ``docs/PRIVILEGE_BOUNDARY.md``. Two rules shape it:
+The check order follows ``docs/OBLIVION_DOCUMENTATION.md §24``. Two rules shape it:
 
 * **The service's allowed roots are the service's own.** A request cannot
   contribute, extend or override them. This is the single control that keeps a

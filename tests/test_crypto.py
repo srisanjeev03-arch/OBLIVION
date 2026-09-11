@@ -2,14 +2,18 @@ from oblivion.certificate import Ed25519SignerVerifier
 from oblivion.core.hashing import Hasher
 
 
-def test_hasher():
-    # File hashing
-    with open("test_file.txt", "w") as f:
-        f.write("hello")
+def test_hasher(tmp_path):
+    # File hashing.
+    #
+    # Written into pytest's tmp_path rather than the working directory. This
+    # test previously wrote `test_file.txt` beside whatever directory pytest was
+    # invoked from and never removed it, so every run left an untracked file in
+    # the repository root. The assertions are unchanged; only the location is.
+    target = tmp_path / "test_file.txt"
+    target.write_text("hello", encoding="utf-8")
 
-    import pathlib
-    h1 = Hasher.hash_file(pathlib.Path("test_file.txt"))
-    h2 = Hasher.hash_file(pathlib.Path("test_file.txt"))
+    h1 = Hasher.hash_file(target)
+    h2 = Hasher.hash_file(target)
 
     assert h1 == h2
     assert len(h1) == 64

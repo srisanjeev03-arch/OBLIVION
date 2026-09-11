@@ -355,7 +355,7 @@ class PrivilegedService:
         ``media_sanitization`` is reported UNAVAILABLE on purpose. This build
         performs no overwrite of any kind, and a capability report that implied
         sanitization would be the single most misleading thing this system could
-        say. See ``docs/COMPLETE_ERASURE_STATUS.md``.
+        say. See ``docs/OBLIVION_DOCUMENTATION.md §15``.
         """
         vault_ready = bool(self._config.vault_root and self._config.vault_key)
         return (

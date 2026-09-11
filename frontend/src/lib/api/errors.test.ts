@@ -32,7 +32,7 @@ describe('ApiError', () => {
 })
 
 describe('error envelope handling', () => {
-  // The backend answers with a flat {error_code, message}; docs/API.md documents a nested
+  // The backend answers with a flat {error_code, message}; docs/OBLIVION_DOCUMENTATION.md §10 documents a nested
   // {error: {code, message}}. Reading only the documented one silently discarded every backend
   // error code, so an operator typing a wrong password was told "Unauthorized" instead of
   // "Invalid username or password".
@@ -55,7 +55,7 @@ describe('error envelope handling', () => {
     expect(err.status).toBe(401)
   })
 
-  it('still reads the nested envelope from docs/API.md', async () => {
+  it('still reads the nested envelope from docs/OBLIVION_DOCUMENTATION.md §10', async () => {
     const err = await apiErrorFromResponse(
       responseWith(403, {
         error: { code: 'TARGET_REVALIDATION_FAILED', message: 'The target changed.', retryable: false },

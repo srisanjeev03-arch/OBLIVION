@@ -4,7 +4,7 @@ Deterministic and dependency-free. The same dataset and provider produce the
 same report on any machine, which is what makes the fine-tuning decision
 something a reader can check rather than take on trust.
 
-See ``docs/PHASE27_EVALUATION.md``.
+See ``docs/OBLIVION_DOCUMENTATION.md §26``.
 """
 
 from oblivion.evaluation.baseline import RULES, BaselineHeuristicProvider

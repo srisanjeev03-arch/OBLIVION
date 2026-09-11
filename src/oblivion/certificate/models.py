@@ -12,7 +12,7 @@ outside the certificate:
 
 The embedded ``public_key`` is a claim about which key signed this, nothing
 more. It is deliberately insufficient to establish trust - see
-``docs/CERTIFICATE_SELF_REFERENCE.md``.
+``docs/OBLIVION_DOCUMENTATION.md §21``.
 
 The signature covers the whole canonical payload, not just the evidence digest,
 so altering any field above invalidates it.

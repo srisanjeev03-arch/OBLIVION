@@ -4,7 +4,7 @@ DISCOVER → BASELINE → RECOMMEND → AUTHORIZE → ERASE → VALIDATE → TES
 → ANALYZE RESIDUALS → ASSESS ASSURANCE → GENERATE EVIDENCE → ISSUE CERTIFICATE
 → VERIFY CERTIFICATE
 
-See ``docs/PHASE25_CLOSED_LOOP.md`` for what each stage establishes and, just as
+See ``docs/OBLIVION_DOCUMENTATION.md §5`` for what each stage establishes and, just as
 importantly, what it does not.
 """
 

@@ -25,7 +25,7 @@ class ModeCapability:
     """What a mode actually does, and what it therefore cannot prove.
 
     Kept next to the code that performs the deletion so the claim and the
-    behaviour cannot drift apart. See ``docs/COMPLETE_ERASURE_STATUS.md``.
+    behaviour cannot drift apart. See ``docs/OBLIVION_DOCUMENTATION.md §15``.
     """
 
     performs: str
@@ -369,7 +369,7 @@ class ErasureEngine:
         # overwrites content: no sanitization pass exists in this build, and the
         # reported limitations say so. Adding an overwrite here would change what
         # the product may claim, so it is a deliberate implementation decision
-        # rather than a line of code - see docs/COMPLETE_ERASURE_STATUS.md.
+        # rather than a line of code - see docs/OBLIVION_DOCUMENTATION.md §15.
         logger.info("Performing %s (logical removal) on %s", mode.name, target_path)
 
         target = Path(target_path)

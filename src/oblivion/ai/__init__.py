@@ -2,7 +2,7 @@
 
 Advisory means advisory: nothing in this package can delete, authorize, approve,
 or set an outcome, and its import graph contains nothing that can. See
-``docs/PHASE26_AI_BOUNDARY.md``.
+``docs/OBLIVION_DOCUMENTATION.md §26``.
 """
 
 from oblivion.ai.advisor import SYSTEM_RULES, SecurityAdvisor

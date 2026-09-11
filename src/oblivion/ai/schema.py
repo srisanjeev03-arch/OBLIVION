@@ -41,7 +41,7 @@ class AdvisoryKind(str, Enum):
 
 
 class SensitivityClass(str, Enum):
-    """Categories from ``docs/AI.md``.
+    """Categories from ``docs/OBLIVION_DOCUMENTATION.md §26``.
 
     ``UNKNOWN`` exists so a model that cannot classify something says so instead
     of guessing ``ORDINARY``, which would understate risk in exactly the cases

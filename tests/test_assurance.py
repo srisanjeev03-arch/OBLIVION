@@ -156,7 +156,7 @@ def test_complete_evidence_can_still_pass(assurance_engine):
 
 
 def test_passed_summary_makes_no_irrecoverability_claim(assurance_engine):
-    """PASSED must stay bounded by the supported scope (docs/LIMITATIONS.md)."""
+    """PASSED must stay bounded by the supported scope (docs/OBLIVION_DOCUMENTATION.md §36)."""
     result = assurance_engine.assess(
         operation_id="op1",
         target_id="target1",

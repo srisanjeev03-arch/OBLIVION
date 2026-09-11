@@ -1,8 +1,8 @@
 """The Oblivion privileged execution boundary.
 
 The unprivileged API describes work; this package decides whether to do it and
-then does it. See ``docs/PRIVILEGE_BOUNDARY.md`` for the architecture and
-``docs/PHASE24_PRIVILEGED_SERVICE.md`` for the protocol and its guarantees.
+then does it. See ``docs/OBLIVION_DOCUMENTATION.md §24`` for the architecture and
+``docs/OBLIVION_DOCUMENTATION.md §24`` for the protocol and its guarantees.
 
 Application code should reach privileged operations through
 :class:`~oblivion.privileged.client.PrivilegedClient` and nothing else.

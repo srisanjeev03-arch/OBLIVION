@@ -26,7 +26,7 @@ export interface ApiErrorInit {
 
 export class ApiError extends Error {
   readonly kind: ApiErrorKind
-  /** Stable backend error code (docs/API.md) or a client-side pseudo-code. */
+  /** Stable backend error code (docs/OBLIVION_DOCUMENTATION.md §10) or a client-side pseudo-code. */
   readonly code: string
   readonly status: number | undefined
   readonly retryable: boolean

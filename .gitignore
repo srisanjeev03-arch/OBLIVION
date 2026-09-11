@@ -63,3 +63,10 @@ Thumbs.db
 # ---- Archived material (kept on disk, excluded from tracked source) ----
 .archive/
 quarantine/
+
+# ---- Per-developer Claude Code settings (machine-local, never shared) ----
+.claude/settings.local.json
+.claude/worktrees/
+
+# ---- End-to-end harness scratch (disposable, non-system volume) ----
+.e2e-scratch/

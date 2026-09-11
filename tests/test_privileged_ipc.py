@@ -133,7 +133,7 @@ def wire_request(**overrides):
 
 
 def test_operation_allowlist_is_exactly_the_six_documented_operations():
-    """docs/PRIVILEGE_BOUNDARY.md enumerates these and forbids anything else.
+    """docs/OBLIVION_DOCUMENTATION.md §24 enumerates these and forbids anything else.
 
     Pinned as an equality rather than a subset check: a new privileged operation
     must be a deliberate, reviewed change to this list, not something that

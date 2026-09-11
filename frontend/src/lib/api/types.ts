@@ -1,6 +1,6 @@
 /**
  * Domain types mirroring contract/OPENAPI.yaml (v0.1.0) and the standard error shape from the
- * backend's docs/API.md.
+ * backend's docs/OBLIVION_DOCUMENTATION.md §10.
  *
  * Run `npm run gen:api` to regenerate `schema.d.ts` from the contract; the aliases below are
  * kept deliberately narrow so they can be re-pointed at the generated `components['schemas']`
@@ -90,7 +90,7 @@ export interface RestoreRequest {
 }
 
 /**
- * Error envelope as *documented* in docs/API.md: nested under `error`.
+ * Error envelope as *documented* in docs/OBLIVION_DOCUMENTATION.md §10: nested under `error`.
  *
  * IMPORTANT: the backend does not currently emit this shape. It answers with the flat form below
  * (see `FastAPI`'s handlers in `src/oblivion/api/app.py`, which pass `detail` through as

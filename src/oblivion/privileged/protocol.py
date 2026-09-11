@@ -9,7 +9,7 @@ run. Two properties matter most.
 request naming anything else does not reach a handler and cannot be coerced into
 one by casing, whitespace or aliasing. There is deliberately no
 ``execute_command``, no ``powershell``, no ``cmd``, and no way to express an
-arbitrary executable or script - see ``docs/PRIVILEGE_BOUNDARY.md``.
+arbitrary executable or script - see ``docs/OBLIVION_DOCUMENTATION.md §24``.
 
 **Parsing is total and fail-closed.** :meth:`PrivilegedRequest.from_wire` accepts
 only the exact field set, with the exact types, plus the parameters the named
@@ -42,7 +42,7 @@ class ProtocolError(Exception):
 class PrivilegedOperation(str, Enum):
     """The complete set of operations the privileged service will perform.
 
-    Sourced from ``docs/PRIVILEGE_BOUNDARY.md``. Adding a member widens the
+    Sourced from ``docs/OBLIVION_DOCUMENTATION.md §24``. Adding a member widens the
     privileged attack surface, so each must be a specific filesystem action with
     a validated target - never a general-purpose escape hatch.
     """
@@ -393,7 +393,7 @@ class PrivilegedRequest:
 class PrivilegedResponse:
     """A structured result. Never shell output, never a raw exception.
 
-    ``docs/PRIVILEGE_BOUNDARY.md`` requires structured status rather than command
+    ``docs/OBLIVION_DOCUMENTATION.md §24`` requires structured status rather than command
     output, so handlers return data and the service converts anything unexpected
     into a ``FAILED`` response carrying a message it chose - never a traceback,
     which would leak privileged-side paths and internals to the unprivileged
