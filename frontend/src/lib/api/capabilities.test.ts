@@ -57,8 +57,12 @@ describe('gaps are named, not hidden', () => {
   // `GET /api/audit/events` and `POST /api/audit/verify`, so the gap is closed
   // and the capability is contracted like any other - keeping it in this list
   // would assert a limitation that no longer exists.
+  // `operations.list` was removed from this list when F-D shipped
+  // `GET /api/operations`. The entry asserted a limitation that no longer
+  // exists, and leaving it would have kept the console refusing a capability
+  // the backend actually serves - which is the exact failure mode this file's
+  // header describes as the more dangerous direction.
   const GAPPED: CapabilityId[] = [
-    'operations.list',
     'targets.list',
     'assurance.get',
     'certificates.list',

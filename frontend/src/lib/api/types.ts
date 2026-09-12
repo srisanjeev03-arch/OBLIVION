@@ -34,6 +34,9 @@ export interface Sensitivity {
 export interface TargetProfile {
   id?: string
   path?: string
+  /** Backend-canonicalised path. `GET /api/targets/{id}` returns it; the
+   *  analyze response does not always carry one. */
+  canonical_path?: string
   type?: string
   size_bytes?: number
   file_count?: number

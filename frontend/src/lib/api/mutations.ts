@@ -134,13 +134,25 @@ export function useRestoreRecoveryObjectMutation(recoveryId: string) {
  *
  * The console does not verify anything itself and never did: there is no frontend crypto here.
  */
+/**
+ * Expectations the caller brings to a verification.
+ *
+ * These must come from somewhere other than the certificate. Reading them off the certificate and
+ * handing them back would make the artifact prove its own identity, and both dimensions would pass
+ * for any internally consistent forgery.
+ */
+export interface CertificateExpectations {
+  expected_operation_id?: string
+  expected_target_identity?: string
+}
+
 export function useVerifyCertificateMutation(certificateId: string) {
   const qc = useQueryClient()
-  return useMutation<CertificateVerificationOut, ApiError, void>({
-    mutationFn: () =>
-      gatedMutation<undefined, CertificateVerificationOut>('certificates.verify', {
+  return useMutation<CertificateVerificationOut, ApiError, CertificateExpectations | void>({
+    mutationFn: (expectations) =>
+      gatedMutation<CertificateExpectations, CertificateVerificationOut>('certificates.verify', {
         certificate_id: certificateId,
-      })(undefined),
+      })(expectations ?? {}),
     retry: false,
     onSuccess: (result) => {
       qc.setQueryData(queryKeys.certificateVerification(certificateId), result)

@@ -111,7 +111,29 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Operations
+         * @description List persisted operations (requires ``operation.view``).
+         *
+         *     This closes the gap that forced an operator to paste an operation ID into
+         *     the address bar: the console had a ledger and the contract published no way
+         *     to fill it.
+         *
+         *     Filtering is applied in the database, and every field returned comes from a
+         *     persisted row. Nothing is synthesised - no identifier, no state, no
+         *     progress. An operation that does not exist does not appear.
+         *
+         *     Authorization is the existing model, unchanged: ``operation.view`` is held
+         *     by ADMIN, INVESTIGATOR, OPERATOR, AUDITOR and VIEWER, and this route exposes
+         *     only operation records. It is not a general database listing, and it exposes
+         *     no audit, evidence or certificate material - those keep their own
+         *     permissions (``audit.view``, ``evidence.view``).
+         *
+         *     An unrecognised ``state`` is refused rather than ignored: a filter silently
+         *     dropped returns more than was asked for while looking like it returned
+         *     exactly what was asked for.
+         */
+        get: operations["list_operations_api_operations_get"];
         put?: never;
         /**
          * Create Operation
@@ -610,6 +632,8 @@ export interface components {
              * Format: date-time
              */
             issued_at: string;
+            /** Limitations */
+            limitations?: string[];
         };
         /** CertificateVerificationOut */
         CertificateVerificationOut: {
@@ -844,6 +868,29 @@ export interface components {
             started_at?: string | null;
             /** Completed At */
             completed_at?: string | null;
+        };
+        /**
+         * OperationPageOut
+         * @description A page of persisted operations, newest first.
+         *
+         *     ``total`` is the number of operations matching the filter, not the size of
+         *     this page, so a reader can tell a window from the whole set without
+         *     inferring it from the page happening to be full.
+         *
+         *     Every row comes from the database. No identifier and no state is
+         *     synthesised here; an operation that does not exist simply does not appear.
+         */
+        OperationPageOut: {
+            /** Operations */
+            operations: components["schemas"]["OperationOut"][];
+            /** Returned */
+            returned: number;
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
         };
         /**
          * OperationStateOut
@@ -1285,6 +1332,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TargetOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_operations_api_operations_get: {
+        parameters: {
+            query?: {
+                state?: string | null;
+                operation_id?: string | null;
+                requested_by?: string | null;
+                target_id?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationPageOut"];
                 };
             };
             /** @description Validation Error */

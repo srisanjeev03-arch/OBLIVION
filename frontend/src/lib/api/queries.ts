@@ -76,6 +76,7 @@ export const queryKeys = {
   all: ['oblivion'] as const,
   target: (id: string) => ['oblivion', 'target', id] as const,
   operation: (id: string) => ['oblivion', 'operation', id] as const,
+  operations: (filters: OperationFilters) => ['oblivion', 'operations', filters] as const,
   operationEvents: (id: string) => ['oblivion', 'operation', id, 'events'] as const,
   recoveryObjects: () => ['oblivion', 'recovery-objects'] as const,
   certificate: (id: string) => ['oblivion', 'certificate', id] as const,
@@ -121,6 +122,42 @@ export function useOperationQuery(operationId: string | undefined, options?: { p
     ),
     enabled: !!operationId && isAvailable('operations.get'),
     refetchInterval: options?.pollMs,
+  })
+}
+
+export type OperationPageOut = components['schemas']['OperationPageOut']
+
+export interface OperationFilters {
+  state?: string
+  operation_id?: string
+  requested_by?: string
+  target_id?: string
+  limit?: number
+  offset?: number
+}
+
+/**
+ * List persisted operations.
+ *
+ * Filtering is sent to the backend rather than applied to a fetched-everything
+ * result: the console should not be reading rows it was not asked to show, and
+ * a client-side filter would quietly stop working as soon as the first page no
+ * longer held the whole set.
+ */
+export function useOperationsQuery(filters: OperationFilters = {}) {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== '') query.set(key, String(value))
+  }
+  const suffix = query.toString()
+
+  return useQuery<OperationPageOut, ApiError>({
+    queryKey: queryKeys.operations(filters),
+    queryFn: gatedFetcher<OperationPageOut>(
+      'operations.list',
+      `${buildPath('operations.list')}${suffix ? `?${suffix}` : ''}`,
+    ),
+    enabled: isAvailable('operations.list'),
   })
 }
 

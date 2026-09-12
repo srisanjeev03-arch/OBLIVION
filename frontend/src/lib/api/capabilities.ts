@@ -33,6 +33,7 @@ export type CapabilityId =
   | 'operations.execute'
   | 'operations.cancel'
   | 'operations.events'
+  | 'operations.list'
   | 'operations.pipeline'
   | 'recovery.list'
   | 'recovery.restore'
@@ -44,7 +45,6 @@ export type CapabilityId =
   | 'health'
   // Absent from the contract. Each is kept here so the screen that would use it can name the gap
   // precisely instead of rendering an empty success state.
-  | 'operations.list'
   | 'targets.list'
   | 'assurance.get'
   | 'certificates.list'
@@ -136,6 +136,15 @@ export const CAPABILITIES: Readonly<Record<CapabilityId, Capability>> = {
     destructive: false,
     summary: 'Request cancellation.',
   },
+  'operations.list': {
+    id: 'operations.list',
+    method: 'GET',
+    path: '/api/operations',
+    destructive: false,
+    summary:
+      'List persisted operations, newest first, filtered server-side by state, id, requester ' +
+      'or target. Requires operation.view.',
+  },
   'operations.events': {
     id: 'operations.events',
     method: 'GET',
@@ -213,16 +222,6 @@ export const CAPABILITIES: Readonly<Record<CapabilityId, Capability>> = {
     summary: 'Unauthenticated liveness probe.',
   },
   // --- deliberately not in the contract -------------------------------------------------
-  'operations.list': {
-    id: 'operations.list',
-    method: 'GET',
-    path: '/api/operations',
-    destructive: false,
-    summary: 'List operations.',
-    gapNote:
-      'The contract publishes no operation collection route, so the console cannot enumerate ' +
-      'operations. It opens a specific operation by ID instead of showing a fabricated table.',
-  },
   'targets.list': {
     id: 'targets.list',
     method: 'GET',

@@ -15,20 +15,43 @@ import { Badge } from '@/components/ui/Badge'
 import { AIPanel } from '@/components/ai/AIPanel'
 import type { AIAnalysisData } from '@/components/ai/AIAnalysisDrawer'
 import { useAIPreferences } from '@/stores/ai.store'
+import { useUIStore } from '@/stores/ui.store'
 
 export function Targets() {
   const [targetPath, setTargetPath] = useState('')
   const [includeContentAnalysis, setIncludeContentAnalysis] = useState(true)
   const analyzeMutation = useAnalyzeTargetMutation()
   const aiEnabled = useAIPreferences((s) => s.enabled)
+  const setSelectedTargetId = useUIStore((s) => s.setSelectedTargetId)
 
   const handleAnalyze = (e: React.FormEvent) => {
     e.preventDefault()
     if (!targetPath.trim()) return
-    analyzeMutation.mutate({
-      path: targetPath.trim(),
-      include_content_analysis: includeContentAnalysis,
-    })
+    analyzeMutation.mutate(
+      {
+        path: targetPath.trim(),
+        include_content_analysis: includeContentAnalysis,
+      },
+      {
+        // Selecting the profiled target is what connects this screen to the
+        // erasure workflow. `setSelectedTargetId` existed on the store and was
+        // never called, so `selectedTargetId` was permanently null: a target
+        // could be profiled successfully and then never become the subject of
+        // an operation.
+        //
+        // The identifier comes from the backend's response, never from the path
+        // the operator typed. The backend remains authoritative - it revalidates
+        // the target when the operation is created, and again immediately before
+        // anything destructive happens.
+        // `id` is optional in the contract, so it is checked rather than
+        // coerced. A response without one selects nothing: the workflow then
+        // reports that no target is selected, which is true, instead of
+        // carrying an empty identifier the backend would reject later.
+        onSuccess: (analysed) => {
+          if (analysed.id) setSelectedTargetId(analysed.id)
+        },
+      },
+    )
   }
 
   const profile = analyzeMutation.data

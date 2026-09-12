@@ -8,12 +8,17 @@ import { Select } from '@/components/ui/Select'
 import { DataTable, type ColumnDef } from '@/components/ui/DataTable'
 import { StatusBadge } from '@/components/status/StatusBadge'
 import { EvidenceId } from '@/features/evidence/components/EvidenceId'
-import { EmptyState, UnavailableState } from '@/components/states'
+import { EmptyState, ErrorState, LoadingState, UnavailableState } from '@/components/states'
 import { InspectorDrawer } from '@/components/shell/InspectorDrawer'
 import { EvidenceChainViewer } from '@/features/evidence/components/EvidenceChainViewer'
-import { useOperationEventsQuery, useOperationQuery } from '@/lib/api'
+import {
+  toScreenState,
+  useOperationEventsQuery,
+  useOperationQuery,
+  useOperationsQuery,
+} from '@/lib/api'
 import { useUIStore } from '@/stores/ui.store'
-import { isAvailable } from '@/lib/api/capabilities'
+import { isAvailable, unavailableReason } from '@/lib/api/capabilities'
 import type { Operation } from '@/lib/api/types'
 
 export function Operations() {
@@ -25,6 +30,31 @@ export function Operations() {
   const [inspectedOpId, setInspectedOpId] = useState<string | null>(null)
 
   const isOpsListAvailable = isAvailable('operations.list')
+
+  // The state filter is sent to the backend; the free-text search narrows only
+  // what is already on screen. Keeping them separate matters: a server-side
+  // filter changes what was asked for, a client-side one changes only what is
+  // shown, and conflating them would let "no matches here" read as "none exist".
+  const operationsQuery = useOperationsQuery({
+    limit: 200,
+    ...(stateFilter === 'ALL' ? {} : { state: stateFilter }),
+  })
+  const screen = toScreenState('operations.list', operationsQuery, (page) =>
+    page.operations.length === 0,
+  )
+
+  const allOperations = operationsQuery.data?.operations ?? []
+  const needle = searchQuery.trim().toLowerCase()
+  const rows: Operation[] = (
+    needle
+      ? allOperations.filter((op) =>
+          [op.id, op.target_id, op.mode, op.state, op.policy_id ?? '']
+            .join(' ')
+            .toLowerCase()
+            .includes(needle),
+        )
+      : allOperations
+  ) as Operation[]
 
   // Query inspected operation details if selected
   const { data: inspectedOp } = useOperationQuery(inspectedOpId ?? undefined)
@@ -130,14 +160,23 @@ export function Operations() {
               hideLabel
               value={stateFilter}
               onChange={(val) => setStateFilter(val)}
+              // Every option is a state the backend machine can actually
+              // report. "Running / Erasing" was offered here and is not one:
+              // the filter now goes to the server, which refuses an unknown
+              // state rather than silently returning everything.
               options={[
                 { value: 'ALL', label: 'All Lifecycle States' },
                 { value: 'CREATED', label: 'Created' },
-                { value: 'RUNNING', label: 'Running / Erasing' },
+                { value: 'PENDING_APPROVAL', label: 'Pending Approval' },
+                { value: 'READY', label: 'Ready' },
+                { value: 'ERASING', label: 'Erasing' },
+                { value: 'VERIFYING', label: 'Verifying' },
+                { value: 'RECONCILIATION_REQUIRED', label: 'Reconciliation Required' },
                 { value: 'COMPLETED', label: 'Completed' },
-                { value: 'FAILED', label: 'Failed' },
                 { value: 'PARTIAL', label: 'Partial' },
+                { value: 'FAILED', label: 'Failed' },
                 { value: 'INCONCLUSIVE', label: 'Inconclusive' },
+                { value: 'CANCELLED', label: 'Cancelled' },
               ]}
               size="sm"
             />
@@ -147,8 +186,11 @@ export function Operations() {
         {/* Table Content */}
         {!isOpsListAvailable ? (
           <UnavailableState
-            title="Operations Listing Awaiting Backend Phase 2"
-            reason="The backend contract currently supports querying individual operations by ID (GET /api/operations/{id}). Listing all operations via GET /api/operations is planned for Phase 2."
+            title="Operations listing not published by this backend"
+            reason={
+              unavailableReason('operations.list') ??
+              'The contract publishes no operation collection route.'
+            }
             action={
               <div className="flex gap-2">
                 <Button variant="default" size="sm" onClick={() => navigate('/targets')}>
@@ -160,10 +202,24 @@ export function Operations() {
               </div>
             }
           />
+        ) : screen.state === 'LOADING' ? (
+          <LoadingState title="Reading the operations ledger" />
+        ) : screen.state === 'BLOCKED' ? (
+          <UnavailableState
+            title="Your role cannot list operations"
+            reason={screen.reason ?? 'Listing operations requires operation.view.'}
+          />
+        ) : screen.state === 'FAILED' ? (
+          <ErrorState
+            error={operationsQuery.error}
+            title="The operations ledger could not be read"
+            onRetry={() => void operationsQuery.refetch()}
+            retrying={operationsQuery.isFetching}
+          />
         ) : (
           <DataTable<Operation>
             columns={columns}
-            rows={[]}
+            rows={rows}
             rowKey={(op) => op.id ?? ''}
             caption="Operations"
             emptyContent={

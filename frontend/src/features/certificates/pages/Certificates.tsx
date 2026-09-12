@@ -9,6 +9,8 @@ import { CertificateVerificationPanel } from '@/features/certificates/components
 import { EmptyState, ErrorState, LoadingState } from '@/components/states'
 import {
   useCertificateQuery,
+  useOperationQuery,
+  useTargetQuery,
   useVerifyCertificateMutation,
   type CertificateVerificationOut,
 } from '@/lib/api'
@@ -36,6 +38,7 @@ export function Certificates() {
 
   const certificateQuery = useCertificateQuery(lookupId ?? undefined)
   const verifyMutation = useVerifyCertificateMutation(lookupId ?? '')
+  const cert = certificateQuery.data
 
   const handleLookup = (e: FormEvent) => {
     e.preventDefault()
@@ -45,13 +48,39 @@ export function Certificates() {
     setLookupId(trimmed)
   }
 
+  // The expectations are built from the operation and target records, fetched
+  // separately, rather than from the certificate's own claims.
+  //
+  // Sending nothing left OPERATION_CONSISTENCY and TARGET_CONSISTENCY at
+  // NOT_CHECKED, so the aggregate could never reach VALID - the console was
+  // displaying a verification that was structurally incapable of succeeding.
+  //
+  // Reading the values off the certificate would have been worse: the artifact
+  // would be proving its own identity, and both dimensions would pass for any
+  // internally consistent forgery. The certificate's `operation_id` is used only
+  // as a lookup key; every value actually *compared* comes from the persisted
+  // operation and its target.
+  const operationQuery = useOperationQuery(cert?.operation_id ?? undefined)
+  const operation = operationQuery.data
+  const targetQuery = useTargetQuery(operation?.target_id ?? undefined)
+  const target = targetQuery.data
+
+  const expectedTargetIdentity = target?.canonical_path ?? target?.path
+  const expectations = {
+    ...(operation?.id ? { expected_operation_id: operation.id } : {}),
+    ...(expectedTargetIdentity ? { expected_target_identity: expectedTargetIdentity } : {}),
+  }
+  // Stated rather than silently degraded: an omitted expectation yields
+  // NOT_CHECKED and an INCONCLUSIVE aggregate, which is the honest answer when
+  // there was nothing independent to check against.
+  const independentExpectationCount = Object.keys(expectations).length
+
   const handleVerify = () => {
     if (!lookupId) return
-    verifyMutation.mutate(undefined, { onSuccess: (result) => setVerification(result) })
+    verifyMutation.mutate(expectations, { onSuccess: (result) => setVerification(result) })
   }
 
   const listGap = unavailableReason('certificates.list')
-  const cert = certificateQuery.data
 
   return (
     <div className="flex flex-col min-h-full">
@@ -131,6 +160,31 @@ export function Certificates() {
                 <EvidenceHash value={cert.signature} label="Signature" />
                 <EvidenceHash value={cert.public_key} label="Public key" />
               </div>
+
+              {/* The scope limitations, which are inside the signature. Shown
+                  with the certificate rather than tucked behind verification:
+                  a reader looking at what was certified needs to see what was
+                  explicitly not established, or the artifact reads as a
+                  stronger claim than the one that was signed. */}
+              <div className="mt-3 space-y-2">
+                <span className="block text-[0.625rem] font-bold uppercase tracking-wider text-dim">
+                  Scope limitations (signed, part of the certificate)
+                </span>
+                {(cert.limitations ?? []).length > 0 ? (
+                  <ul className="space-y-1 rounded-sm border border-line bg-inset p-3">
+                    {(cert.limitations ?? []).map((limitation) => (
+                      <li key={limitation} className="flex gap-2 text-[0.6875rem] text-mute">
+                        <span aria-hidden="true">·</span>
+                        <span>{limitation}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-[0.6875rem] text-dim">
+                    This certificate records no scope limitations.
+                  </p>
+                )}
+              </div>
             </Panel>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -142,6 +196,16 @@ export function Certificates() {
               >
                 Verify at backend
               </Button>
+              {/* Where the expectations came from, said plainly. A verification
+                  run against the certificate's own claims would be circular, and
+                  one run with no expectations can only ever be INCONCLUSIVE. */}
+              <span className="text-[0.6875rem] text-dim">
+                {independentExpectationCount === 2
+                  ? 'Checked against the operation and target records, fetched independently of this certificate.'
+                  : independentExpectationCount === 1
+                    ? 'Only one independent expectation is available; the unchecked dimension will report NOT_CHECKED and the overall result will be INCONCLUSIVE.'
+                    : 'No independent expectation is available yet, so operation and target consistency will report NOT_CHECKED and the overall result will be INCONCLUSIVE.'}
+              </span>
               <span className="text-[0.6875rem] text-dim">
                 Runs POST /api/certificates/&#123;id&#125;/verify. The backend decides validity; this
                 console only renders its answer.

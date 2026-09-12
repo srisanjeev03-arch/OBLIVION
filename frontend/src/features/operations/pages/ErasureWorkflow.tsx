@@ -231,8 +231,8 @@ export function ErasureWorkflow() {
                   </div>
                   <div className="font-bold text-xs text-fg">Complete Erasure</div>
                   <p className="text-[0.6875rem] text-dim leading-relaxed">
-                    Cryptographic key destruction and raw cluster overwrite. Data is mathematically
-                    unrecoverable within tested scope.
+                    Removes a validated directory tree by unlinking it. Logical deletion only — no
+                    overwrite and no media sanitization is performed.
                   </p>
                 </button>
 
@@ -255,8 +255,8 @@ export function ErasureWorkflow() {
                   </div>
                   <div className="font-bold text-xs text-fg">Selective Permanent</div>
                   <p className="text-[0.6875rem] text-dim leading-relaxed">
-                    Purges targeted files, alternate data streams, and journal references without
-                    destroying surrounding container.
+                    Unlinks a single validated file, leaving the surrounding directory intact. No
+                    recovery object is retained.
                   </p>
                 </button>
 
@@ -281,8 +281,8 @@ export function ErasureWorkflow() {
                   </div>
                   <div className="font-bold text-xs text-fg">Controlled Recoverable</div>
                   <p className="text-[0.6875rem] text-dim leading-relaxed">
-                    Quarantines encrypted payload in the Recovery Vault with timed retention and
-                    dual-operator authorization.
+                    Stores an authenticated encrypted copy in the vault and verifies it by read-back
+                    before unlinking the original. Recoverable by design, under RBAC.
                   </p>
                 </button>
               </div>

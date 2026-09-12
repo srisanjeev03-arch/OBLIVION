@@ -169,3 +169,55 @@ describe('no mock or fixture data in shipped code', () => {
     expect(FILES.filter((f) => /mock/i.test(rel(f))).map(rel)).toEqual([])
   })
 })
+
+/**
+ * F-F: capability vocabulary the backend does not implement.
+ *
+ * The erasure wizard described COMPLETE_ERASURE as "cryptographic key destruction and raw cluster
+ * overwrite … mathematically unrecoverable", and SELECTIVE_PERMANENT as purging "journal
+ * references". The backend performs none of those things and reports `media_sanitization` and
+ * `raw_volume_access` as UNAVAILABLE. An operator reading that copy would have believed the
+ * product did something it cannot do, on the very screen where they authorise destruction.
+ *
+ * These patterns are narrower than the ones above: they describe *capabilities*, not verdicts.
+ * "Permanent deletion" stays allowed - it is accurate for a mode that unlinks without retaining a
+ * recovery object - so only the mechanism words are pinned.
+ */
+describe('no unimplemented capability claims', () => {
+  const FORBIDDEN_CAPABILITIES: Array<[string, RegExp]> = [
+    ['cryptographic key destruction', /cryptographic\s+key\s+destruction/i],
+    ['cluster overwrite', /(raw\s+)?cluster\s+overwrite/i],
+    ['journal purging', /(purg\w*|wip\w*|scrub\w*)[^.\n]{0,40}journal/i],
+    [
+      'NAND or media sanitization as a performed action',
+      /\b(perform|execut|appl)\w*[^.\n]{0,40}\b(nand|media)\s+sanitiz/i,
+    ],
+    ['overwrite passes', /\b\d+\s*[- ]?pass(es)?\b[^.\n]{0,30}overwrit/i],
+    ['degauss', /degauss/i],
+    ['gutmann', /gutmann/i],
+    ['DoD 5220', /dod\s*5220/i],
+  ]
+
+  for (const [label, pattern] of FORBIDDEN_CAPABILITIES) {
+    it(`claims no ${label}`, () => {
+      expect(hitsFor(pattern)).toEqual([])
+    })
+  }
+
+  it('never calls data mathematically unrecoverable', () => {
+    // The phrase that made the strongest claim of all, and the reason this
+    // block exists. A method finding nothing is evidence about that method.
+    expect(hitsFor(/mathematic\w*\s+unrecoverab/i)).toEqual([])
+  })
+
+  it('states the logical-deletion limit where the modes are chosen', () => {
+    // Not a denylist: the wizard must positively say what it does. Without this,
+    // the forbidden phrases could be removed and replaced by silence, which
+    // reads as a stronger claim than an explicit limit.
+    const wizard = FILES.find((f) => rel(f).endsWith('operations/pages/ErasureWorkflow.tsx'))
+    expect(wizard, 'the erasure wizard must exist').toBeDefined()
+    const text = codeOnly(wizard as string)
+    expect(text).toMatch(/logical deletion only/i)
+    expect(text).toMatch(/no media sanitization is performed/i)
+  })
+})
