@@ -103,12 +103,12 @@ that method, not proof of irrecoverability. An unconfigured trust anchor yields
 
 | | |
 |---|---|
-| Backend tests | 562 passed, 2 skipped, 1 xfailed |
-| Frontend tests | 205 passed, 0 failed |
+| Backend tests | 591 passed, 3 skipped, 1 xfailed |
+| Frontend tests | 221 passed, 0 failed |
 | mypy (strict) | clean, 115 source files |
 | Frontend typecheck / lint / build | clean / clean / OK |
-| OpenAPI contract | 20 paths, gate passing |
-| Live backend end-to-end | 23/23 steps |
+| OpenAPI contract | 21 operations across 20 paths, gate passing |
+| Live backend end-to-end | 29/29 steps |
 | Browser/live-frontend E2E | **not performed** (see §32, §36) |
 
 ---
@@ -315,8 +315,8 @@ Screen states are a closed vocabulary — `LOADING`, `EMPTY`, `AVAILABLE`, `BLOC
 
 ## 10. API Architecture
 
-Twenty published paths. The contract in `docs/OPENAPI.yaml` is generated from the application
-and gated.
+Twenty-one operations across twenty paths - `GET` and `POST /api/operations` share a path. The
+contract in `docs/OPENAPI.yaml` is generated from the application and gated.
 
 | Method | Path | Permission |
 |---|---|---|
@@ -326,6 +326,7 @@ and gated.
 | POST | `/api/targets/analyze` | `evidence.hash` |
 | GET | `/api/targets/{target_id}` | `evidence.view` |
 | POST | `/api/operations` | `operation.request` |
+| GET | `/api/operations` | `operation.view` |
 | GET | `/api/operations/{operation_id}` | `operation.view` |
 | POST | `/api/operations/{operation_id}/approve` | `operation.approve` |
 | POST | `/api/operations/{operation_id}/execute` | `operation.execute` |
@@ -687,6 +688,23 @@ cannot establish the identity against which it is verified: `expected_operation_
 With no trust anchor configured, `SIGNER_TRUST` is `NOT_CHECKED` and the overall verdict is
 `INCONCLUSIVE`. That is correct fail-closed behaviour, not a defect.
 
+### Limitations travel with the certificate
+
+`limitations` is part of the signed canonical payload and is published by
+`GET /api/certificates/{id}`, so a reader sees what was explicitly *not* established - that no
+device or media sanitization was performed, and which recovery methods were never attempted.
+They were persisted and signed but withheld from the API until this milestone; a certificate
+without them reads as a stronger claim than the one that was actually signed. The console
+renders them beside the certificate rather than behind the verify action.
+
+### The expectations come from elsewhere
+
+`expected_operation_id` and `expected_target_identity` are supplied by the caller, and the
+console derives them from the **operation and target records**, fetched separately. Reading
+them off the certificate would let the artifact prove its own identity, and both consistency
+dimensions would pass for any internally consistent forgery. Sending neither is honest but
+weak: both dimensions report `NOT_CHECKED` and the aggregate is `INCONCLUSIVE`.
+
 ---
 
 ## 22. Audit Log Architecture
@@ -744,6 +762,23 @@ logins.
 
 Reading the log is itself a privileged act and is recorded *before* the response is built. A log
 that cannot answer "who read this" is missing exactly the events an insider would want hidden.
+
+### The outcome describes the stage that actually ran
+
+`OPERATION_EXECUTED` is written only when the destructive step was genuinely attempted, and its
+outcome is mapped from the ERASE stage's real status: `COMPLETED` to `SUCCEEDED`; `FAILED` and
+`UNAVAILABLE` to `FAILED`, because the operation had already passed authorization and was
+permitted; `REFUSED` and `SKIPPED` to `REFUSED`, because nothing was destroyed. When the erase
+did not happen, no `OPERATION_EXECUTED` record is written at all - an append-only log must not
+carry a record of an execution that never occurred - and the refusal is carried by
+`PIPELINE_CONCLUDED` instead.
+
+This was audit finding F-A. `Stage` mixes in `str`, but `Enum.__str__` still wins, so
+`str(Stage.ERASE)` is `"Stage.ERASE"` and comparing it against `"ERASE"` was always false. Every
+run - successful ones included - recorded `outcome=FAILED, erase_status=NOT_RUN`, and a refused
+operation recorded exactly the same thing. The stage is now located by enum identity and mapped
+through a table that is total over `StageStatus`, so a new stage status forces a decision rather
+than defaulting.
 
 ### Failures are never swallowed
 
@@ -1130,21 +1165,21 @@ multi-worker scope), plus the informational observations above.
 
 | Gate | Result |
 |---|---|
-| Backend pytest | **562 passed, 2 skipped, 1 xfailed** |
+| Backend pytest | **591 passed, 3 skipped, 1 xfailed** |
 | mypy (strict) | **clean, 115 source files** |
-| Frontend Vitest | **205 passed, 0 failed** (20 files) |
+| Frontend Vitest | **221 passed, 0 failed** (21 files) |
 | Frontend typecheck | **clean** |
 | Frontend lint | **clean** (`--max-warnings 0`) |
 | Frontend build | **OK** |
-| OpenAPI contract gate | **OK — 20 paths** |
-| Live backend E2E | **23/23 steps** |
+| OpenAPI contract gate | **OK — 21 operations, 20 paths** |
+| Live backend E2E | **29/29 steps** |
 
 ### Three distinct levels of verification — do not conflate them
 
 | Level | What it exercises | Status |
 |---|---|---|
 | **Automated tests** | Units, integration, API via `TestClient`; frontend components with the real query layer, capability gate and HTTP client over a stubbed network | **Performed** |
-| **Live backend E2E** | A real `uvicorn` server, real HTTP, real bearer tokens, a real file erased on a disposable non-system volume, real certificate verification, real audit chain and real injected tampering | **Performed — 23/23** |
+| **Live backend E2E** | A real `uvicorn` server, real HTTP, real bearer tokens, a real file erased on a disposable non-system volume, real certificate verification, real audit chain and real injected tampering | **Performed — 29/29** |
 | **Browser / live-frontend E2E** | The actual UI driven against the live backend | **NOT PERFORMED** |
 
 The link between the frontend and the live backend is **mechanical rather than observed**: the
@@ -1289,8 +1324,8 @@ Stated plainly. Nothing here is hidden, and none of it is worked around by weake
 2. **No user-management endpoint exists.** Principals must be provisioned directly against the
    database; the Administration screen cannot create users.
 3. **Capabilities absent from the contract**, each labelled in the registry with what the screen
-   does instead: `operations.list`, `targets.list`, `assurance.get`, `certificates.list`,
-   `residual.findings`.
+   does instead: `targets.list`, `assurance.get`, `certificates.list`, `residual.findings`.
+   (`operations.list` was one of these until `GET /api/operations` shipped.)
 4. **Screens not individually live-verified**: Dashboard, Assurance, Residual, Recovery. They
    consume the generated contract and are covered by the contract gate and tests, but no live
    walkthrough was performed.
@@ -1336,7 +1371,7 @@ Clearly separated from current capability. **None of the following is implemente
 | External anchoring | Timestamping or third-party notarisation so audit history is provable against an outside reference |
 | Distributed replay store | Shared, restart-persistent nonce storage to close N-1 across workers |
 | User management API | Provisioning, role assignment and deactivation through the API |
-| Collection endpoints | `operations.list`, `targets.list`, `certificates.list`, assurance and residual reads |
+| Collection endpoints | `targets.list`, `certificates.list`, assurance and residual reads |
 | Asynchronous execution | Background pipeline execution with progress streaming |
 | Startup reconciliation | Automatic invocation of `OperationReconciler` |
 | Browser E2E | Playwright suite driving the console against a live backend |
@@ -1386,7 +1421,7 @@ docs/               OBLIVION_DOCUMENTATION.md (this file) + OPENAPI.yaml (genera
 ```bash
 pip install -r requirements.txt
 alembic upgrade head
-python -m pytest -q                      # 562 passed, 2 skipped, 1 xfailed
+python -m pytest -q                      # 591 passed, 3 skipped, 1 xfailed
 python -m mypy src/oblivion              # clean, 115 files
 python -m ruff check src/oblivion
 python -m uvicorn oblivion.api:app --reload
@@ -1555,10 +1590,10 @@ Every gate produced **exactly** its pre-cleanup result:
 
 | Gate | Before | After |
 |---|---|---|
-| Backend pytest | 562 passed, 2 skipped, 1 xfailed | **562 passed, 2 skipped, 1 xfailed** |
+| Backend pytest | 562 passed, 2 skipped, 1 xfailed | **591 passed, 3 skipped, 1 xfailed** |
 | mypy (strict) | clean, 115 files | **clean, 115 files** |
 | ruff (`src/oblivion`) | 191 pre-existing | **191** |
-| Frontend Vitest | 205 passed | **205 passed** |
+| Frontend Vitest | 205 passed | **221 passed** |
 | Frontend typecheck | clean | **clean** |
 | Frontend lint | clean | **clean** |
 | Frontend build | OK | **OK** |

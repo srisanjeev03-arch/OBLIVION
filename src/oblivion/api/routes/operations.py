@@ -200,7 +200,13 @@ async def list_operations(
     target_id: str | None = Query(None, max_length=64),
     limit: int = Query(50, ge=1, le=_MAX_PAGE),
     offset: int = Query(0, ge=0),
-    current_user: UserModel = Depends(require_permission("operation.view")),
+    # Declared for its dependency, not its value: evaluating `require_permission`
+    # is what enforces authorization. Removing the parameter would remove the
+    # gate, so the unused-argument warning is silenced deliberately rather than
+    # by dropping the guard.
+    current_user: UserModel = Depends(  # noqa: ARG001
+        require_permission("operation.view")
+    ),
     db: Session = Depends(get_db),
 ) -> OperationPageOut:
     """List persisted operations (requires ``operation.view``).
