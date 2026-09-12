@@ -41,7 +41,7 @@ from oblivion.certificate.trust_model import TrustStore
 from oblivion.core.audit import AuditEventType, AuditLog, AuditOutcome
 from oblivion.core.pipeline import ClosedLoopPipeline, PipelineRequest
 from oblivion.core.pipeline.orchestrator import Stage, StageStatus
-from oblivion.core.safety.paths import SafePathValidator
+from oblivion.core.safety.paths import SafePathValidator, decode_file_id
 from oblivion.core.state.machine import State
 from oblivion.persistence.models.user import UserModel
 from oblivion.persistence.repositories.operation_repo import OperationRepository
@@ -191,6 +191,11 @@ async def run_pipeline(
             policy_id=operation.policy_id or "",
             # From the authenticated session. Never from the request.
             actor_id=current_user.id,
+            # From the persisted target record, written at analysis. Never from
+            # the request body and never re-read from disk here: the value has
+            # to predate the approval for checking it to mean anything.
+            expected_volume_serial=target.volume_serial,
+            expected_file_id=decode_file_id(target.file_id),
         )
     )
 

@@ -9,6 +9,43 @@ from typing import Any, cast
 class PathSafetyError(Exception):
     """Raised when a path safety check fails."""
 
+
+#: Separator for the persisted form of a file identity. The identity itself stays
+#: the tuple ``SafePathValidator._get_file_id`` returns; these two functions only
+#: move it in and out of a text column, so no second identity model exists.
+_FILE_ID_SEPARATOR = ":"
+
+
+def encode_file_id(file_id: tuple[int, int, int] | None) -> str | None:
+    """Render a file identity for storage, or ``None`` when there is none.
+
+    ``None`` in means ``None`` out: a platform that cannot produce a file
+    identity must persist an absent one rather than a placeholder, so a reader
+    can tell "not observable here" from "observed and recorded".
+    """
+    if file_id is None:
+        return None
+    return _FILE_ID_SEPARATOR.join(str(int(part)) for part in file_id)
+
+
+def decode_file_id(raw: str | None) -> tuple[int, int, int] | None:
+    """Read a stored file identity back as the tuple the validator compares.
+
+    Anything that is not exactly three integers returns ``None`` - an
+    unparseable identity is an absent one, and callers must fail closed on
+    absence rather than treat a malformed value as a match.
+    """
+    if not raw:
+        return None
+    parts = raw.split(_FILE_ID_SEPARATOR)
+    if len(parts) != 3:
+        return None
+    try:
+        return (int(parts[0]), int(parts[1]), int(parts[2]))
+    except ValueError:
+        return None
+
+
 class SafePathValidator:
     """
     Enforces Oblivion path safety rules:

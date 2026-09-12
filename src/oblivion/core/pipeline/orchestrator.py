@@ -147,6 +147,18 @@ class PipelineRequest:
     actor_id: str
     filesystem: str = "NTFS"
 
+    #: The target identity recorded when the target was analysed - before the
+    #: operation existed and long before it was approved. The erase stage checks
+    #: the object on disk against *these* values.
+    #:
+    #: They are optional only so the dataclass can be constructed without them;
+    #: an absent identity is not a permission to skip the check. ``_erase``
+    #: refuses when it cannot establish what was approved, because the
+    #: alternative - reading the identity from disk at execution time - compares
+    #: the object with itself and accepts a substitution (audit finding A-2).
+    expected_volume_serial: str | None = None
+    expected_file_id: tuple[int, int, int] | None = None
+
 
 @dataclass
 class PipelineResult:
@@ -272,6 +284,18 @@ class ClosedLoopPipeline:
             return result
 
         execution = self._erase(request, result)
+
+        if self._erase_was_refused(result):
+            # The destructive step declined, so nothing was destroyed and nothing
+            # downstream has anything to measure. This takes the same exit as a
+            # refused authorization: a rejected execution has to stay rejected
+            # through the rest of the machine, rather than running recovery
+            # testing and residual analysis over an object that is still there
+            # and letting an assurance verdict or a certificate be built on it.
+            result.final_state = State.FAILED.name
+            self._finalise_without_certificate(request, result, baseline, started_at)
+            return result
+
         verification = self._validate(request, result, target_path, execution)
         recovery_report = self._test_recovery(request, result, baseline, target_path)
         residual_report = self._analyse_residuals(request, result, baseline, target_path)
@@ -526,8 +550,45 @@ class ClosedLoopPipeline:
             )
             return None
 
-        serial = self._validator.get_volume_serial(request.target_path)
-        file_id = self._validator._get_file_id(request.target_path)
+        # The identity this operation was approved against, carried from the
+        # persisted target record. It is deliberately NOT read from the
+        # filesystem here: doing that compares the object with itself and lets a
+        # file substituted after approval be erased as though it were the
+        # approved one (audit finding A-2).
+        serial = request.expected_volume_serial
+        file_id = request.expected_file_id
+
+        if serial is None or file_id is None:
+            result.stages.append(
+                StageOutcome(
+                    Stage.ERASE,
+                    StageStatus.REFUSED,
+                    "No target identity was recorded when this target was analysed, so "
+                    "there is nothing to check the object on disk against. Refusing: an "
+                    "unestablished identity is not a matching one. Re-analyse the target.",
+                    {
+                        "expected_volume_serial_present": serial is not None,
+                        "expected_file_id_present": file_id is not None,
+                    },
+                )
+            )
+            return None
+
+        # The same comparison the engine and the privileged service perform,
+        # applied here against the approved identity before anything is asked of
+        # the privileged boundary. Reused rather than reimplemented.
+        if not self._validator.revalidate_handle(request.target_path, serial, file_id):
+            result.stages.append(
+                StageOutcome(
+                    Stage.ERASE,
+                    StageStatus.REFUSED,
+                    "The object at this path is not the object that was approved: its "
+                    "identity no longer matches the one recorded at analysis. Refusing "
+                    "rather than erasing a substituted object.",
+                    {"target_identity_verified": False},
+                )
+            )
+            return None
 
         try:
             response = self._privileged.request(
@@ -951,6 +1012,19 @@ class ClosedLoopPipeline:
 
     # -- helpers ---------------------------------------------------------
 
+    @staticmethod
+    def _erase_was_refused(result: PipelineResult) -> bool:
+        """True when the erase stage declined rather than ran.
+
+        Only ``REFUSED`` counts. An erase that was attempted and failed, or that
+        could not reach the privileged service, did enter execution and the
+        stages after it still have something to say about the target.
+        """
+        return any(
+            stage.stage is Stage.ERASE and stage.status is StageStatus.REFUSED
+            for stage in result.stages
+        )
+
     def _finalise_without_certificate(
         self,
         request: PipelineRequest,
@@ -963,7 +1037,19 @@ class ClosedLoopPipeline:
         A refused operation is still a fact worth recording: it says the system
         declined, when, and why. The evidence names every stage that did not run
         rather than leaving them absent.
+
+        A stage that *did* report is left exactly as it reported. Two callers
+        reach here now - a refused authorization, where nothing downstream ran at
+        all, and a refused erase, where the erase stage has already recorded why
+        it declined. Overwriting that with a blanket SKIPPED would replace the
+        real reason with a wrong one.
         """
+        already_recorded = {outcome.stage for outcome in result.stages}
+        reason = (
+            "The destructive step was refused, so this stage did not run."
+            if Stage.ERASE in already_recorded
+            else "The operation was not authorized, so this stage did not run."
+        )
         for stage in (
             Stage.ERASE,
             Stage.VALIDATE,
@@ -971,13 +1057,9 @@ class ClosedLoopPipeline:
             Stage.ANALYZE_RESIDUALS,
             Stage.ASSESS_ASSURANCE,
         ):
-            result.stages.append(
-                StageOutcome(
-                    stage,
-                    StageStatus.SKIPPED,
-                    "The operation was not authorized, so this stage did not run.",
-                )
-            )
+            if stage in already_recorded:
+                continue
+            result.stages.append(StageOutcome(stage, StageStatus.SKIPPED, reason))
 
         self._generate_evidence(
             request,

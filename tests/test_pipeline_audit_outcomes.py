@@ -33,6 +33,7 @@ from oblivion.core.pipeline.orchestrator import Stage, StageStatus
 from oblivion.core.state.machine import State
 from oblivion.persistence.database import get_session_factory, init_db
 from oblivion.persistence.repositories.operation_repo import OperationRepository
+from tests.fixtures import observed_identity
 
 SELECTIVE_POLICY = "ERASURE.LOGICAL.SELECTIVE.V1"
 SIGNER_ID = "oblivion-issuer"
@@ -67,6 +68,10 @@ def create_operation(target_path, *, state=State.READY.name, approver=APPROVER):
             path=str(target_path),
             canonical_path=str(target_path),
             target_type="file",
+            # As the analyze route records it. Without an identity the erase
+            # stage refuses, so these outcome tests would be measuring a
+            # refusal rather than the outcome they exist to pin.
+            **observed_identity(target_path),
         )
         repo.create_operation(
             operation_id=f"op_{suffix}",

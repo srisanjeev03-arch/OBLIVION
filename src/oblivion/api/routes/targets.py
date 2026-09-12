@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from oblivion.api.dependencies import get_db, get_safe_validator, require_permission
 from oblivion.api.schemas.target import TargetAnalyzeRequest, TargetOut, TargetProfile
 from oblivion.core.discovery import StorageProfiler, TargetAnalyzer
-from oblivion.core.safety.paths import PathSafetyError, SafePathValidator
+from oblivion.core.safety.paths import PathSafetyError, SafePathValidator, encode_file_id
 from oblivion.persistence.models.user import UserModel
 from oblivion.persistence.repositories.operation_repo import OperationRepository
 
@@ -65,7 +65,17 @@ async def analyze_target(
     file_count = result.get("file_count", 0)
     sha256 = result.get("sha256")
 
-    # Persist target in database for subsequent operations
+    # Persist target in database for subsequent operations.
+    #
+    # The identity observed here is what every later destructive step is checked
+    # against. It is recorded once, at analysis, and never rewritten: an identity
+    # refreshed at execution time would be compared against itself and would
+    # accept a substituted object, which is exactly audit finding A-2. An
+    # existing row is therefore left alone rather than updated - its identity
+    # predates any approval that may already reference it.
+    observed_serial = validator.get_volume_serial(canonical)
+    observed_file_id = validator._get_file_id(canonical)
+
     repo = OperationRepository(db)
     existing = repo.get_target(target_id)
     if not existing:
@@ -77,6 +87,8 @@ async def analyze_target(
             file_count=file_count,
             total_size=size_bytes,
             sha256=sha256,
+            volume_serial=observed_serial,
+            file_id=encode_file_id(observed_file_id),
         )
 
     return TargetProfile(

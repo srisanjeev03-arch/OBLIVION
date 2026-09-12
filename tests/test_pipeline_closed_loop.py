@@ -29,10 +29,12 @@ from oblivion.core.pipeline import (
 )
 from oblivion.core.recovery.testing import MethodOutcome, RecoveryMethod, RecoveryTester
 from oblivion.core.residual.scanners import ResidualScanSuite
+from oblivion.core.safety.paths import decode_file_id
 from oblivion.core.state.machine import State
 from oblivion.persistence.database import get_session_factory, init_db
 from oblivion.persistence.repositories.certificate_repo import CertificateRepository
 from oblivion.persistence.repositories.operation_repo import OperationRepository
+from tests.fixtures import observed_identity
 from oblivion.privileged import (
     InProcessTransport,
     PrivilegedClient,
@@ -89,6 +91,10 @@ def approve_operation(session, target_path, *, approved=True, self_approved=Fals
         path=str(target_path),
         canonical_path=str(target_path),
         target_type="file",
+        # Recorded exactly as the analyze route records it. The erase stage
+        # checks the object on disk against this, so a target persisted without
+        # it is one no operation can ever execute against.
+        **observed_identity(target_path),
     )
     repo.create_operation(
         operation_id=f"op_{suffix}",
@@ -103,7 +109,13 @@ def approve_operation(session, target_path, *, approved=True, self_approved=Fals
     return f"op_{suffix}"
 
 
-def make_request(operation_id, target_path):
+def make_request(
+    operation_id,
+    target_path,
+    *,
+    expected_volume_serial=None,
+    expected_file_id=None,
+):
     return PipelineRequest(
         operation_id=operation_id,
         target_path=str(target_path),
@@ -111,6 +123,8 @@ def make_request(operation_id, target_path):
         mode="SELECTIVE_PERMANENT",
         policy_id=SELECTIVE_POLICY,
         actor_id=APPROVER,
+        expected_volume_serial=expected_volume_serial,
+        expected_file_id=expected_file_id,
     )
 
 
@@ -124,13 +138,28 @@ def run_pipeline(safe_validator, privileged_client, target_path, **kwargs):
             approved=kwargs.pop("approved", True),
             self_approved=kwargs.pop("self_approved", False),
         )
+        # Exactly what the route does: the expected identity is read back from
+        # the persisted target, never observed from the filesystem here. Taking
+        # it from disk at this point would reproduce audit finding A-2 inside
+        # the test and leave the regression undetectable.
+        repo = OperationRepository(session)
+        operation = repo.get_operation(operation_id)
+        target = repo.get_target(operation.target_id)
+
         pipeline = ClosedLoopPipeline(
             session=session,
             validator=safe_validator,
             privileged=privileged_client,
             **kwargs,
         )
-        result = pipeline.run(make_request(operation_id, target_path))
+        result = pipeline.run(
+            make_request(
+                operation_id,
+                target_path,
+                expected_volume_serial=target.volume_serial,
+                expected_file_id=decode_file_id(target.file_id),
+            )
+        )
         session.commit()
     return result
 

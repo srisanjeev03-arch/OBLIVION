@@ -103,7 +103,7 @@ that method, not proof of irrecoverability. An unconfigured trust anchor yields
 
 | | |
 |---|---|
-| Backend tests | 591 passed, 3 skipped, 1 xfailed |
+| Backend tests | 612 passed, 3 skipped, 1 xfailed |
 | Frontend tests | 221 passed, 0 failed |
 | mypy (strict) | clean, 115 source files |
 | Frontend typecheck / lint / build | clean / clean / OK |
@@ -449,9 +449,34 @@ a non-system volume rather than the control being relaxed.
 allowed roots; reparse-point / junction rejection; system-volume protection by volume serial;
 and target identity (volume serial + file ID).
 
-Identity is checked **twice**: once early and cheaply at the boundary, and again by the engine
-immediately before acting. The second check is what closes the TOCTOU window — the first
-refuses early, the second refuses late.
+### What the identity is checked *against*
+
+The identity — volume serial plus file ID — is **observed when the target is analysed** and
+persisted on the target row (`targets.volume_serial`, `targets.file_id`). That stored value
+predates the operation and its approval, and it is what every destructive step is held to. It is
+recorded once and never rewritten; re-analysing an unchanged object returns the same target and
+leaves the recorded identity alone, so nothing can refresh the expectation to match a substitution.
+
+Identity is then checked at three points, and they answer different questions:
+
+| Where | Compares | Closes |
+|---|---|---|
+| API route, before dispatch | persisted identity vs. object now on disk | the gap between **approval and execution** |
+| Privileged service, on receipt | the request's expected identity vs. object now on disk | the gap between **API process and privileged process** |
+| Erasure engine, immediately before unlinking | the identity it was given vs. object now on disk | the gap between **validation and the syscall** |
+
+Absence fails closed. A target with no recorded identity — a row written before this was
+introduced, or a host that cannot observe one — is refused with `TARGET_IDENTITY_UNAVAILABLE`
+rather than executed: an unestablished identity is not a matching one.
+
+> **This was wrong until audit finding A-2.** The earlier revision of this section claimed the
+> engine's late check "closes the TOCTOU window". It did not. The caller read the expected identity
+> from the filesystem microseconds before handing it to the engine, so the engine compared the
+> object with itself and the comparison could not fail. An auditor demonstrated the consequence:
+> a file replaced at the approved path after approval was erased, and the operation recorded a
+> successful completion of the approved operation. Only the third row of the table above existed in
+> any meaningful form, and even that was checking a value derived from the object it was checking.
+> The persisted identity is what makes the first two rows real.
 
 The privileged service's allowed roots are **its own**. Nothing in a request can contribute to,
 extend or override them. This single control is what keeps a compromised API from turning the
@@ -712,12 +737,12 @@ weak: both dimensions report `NOT_CHECKED` and the aggregate is `INCONCLUSIVE`.
 The authoritative record of **what acts were performed against this system, by whom**. This is
 distinct from evidence, which records *what was observed about a target*.
 
-### Nineteen event types
+### Twenty event types
 
 Authentication (`AUTH_LOGIN_SUCCEEDED`, `AUTH_LOGIN_FAILED`, `AUTH_LOGOUT`,
 `AUTH_ACCESS_DENIED`) · discovery (`TARGET_ANALYZED`) · operation lifecycle
 (`OPERATION_CREATED`, `OPERATION_APPROVED`, `OPERATION_APPROVAL_REFUSED`, `OPERATION_EXECUTED`,
-`OPERATION_CANCELLED`, `OPERATION_STATE_CHANGED`) · closed loop (`PIPELINE_STARTED`,
+`OPERATION_EXECUTION_REFUSED`, `OPERATION_CANCELLED`, `OPERATION_STATE_CHANGED`) · closed loop (`PIPELINE_STARTED`,
 `PIPELINE_CONCLUDED`) · recovery (`RECOVERY_RESTORE_REQUESTED`, `RECOVERY_RESTORE_PERFORMED`) ·
 artefacts (`EVIDENCE_RECORDED`, `CERTIFICATE_ISSUED`, `CERTIFICATE_VERIFIED`) · the log about
 the log (`AUDIT_LOG_QUERIED`, `AUDIT_LOG_VERIFIED`) · the boundary
@@ -779,6 +804,23 @@ run - successful ones included - recorded `outcome=FAILED, erase_status=NOT_RUN`
 operation recorded exactly the same thing. The stage is now located by enum identity and mapped
 through a table that is total over `StageStatus`, so a new stage status forces a decision rather
 than defaulting.
+
+### A refusal is recorded as a refusal
+
+Every way `POST /api/operations/{id}/execute` can decline — the operation is unknown, it was never
+approved, its target is gone, its target fails safety revalidation, or the object on disk is not
+the one that was approved — writes `OPERATION_EXECUTION_REFUSED` with outcome `REFUSED`, naming the
+actor, the operation and the target. A principal who lacks the permission entirely is recorded by
+the permission guard as `AUTH_ACCESS_DENIED`.
+
+These are written in a transaction of their own, because the request that caused them is about to
+fail and roll back — the same technique a refused approval uses.
+
+None of them is an `OPERATION_EXECUTED` record with a failed outcome. That would assert an
+execution had begun, and none had. `REFUSED`, `FAILED` and `SUCCEEDED` stay three different claims.
+
+This was audit finding A-1: before it, every one of those refusals returned an error and wrote
+nothing at all, so the log could not answer *"did anyone try to execute an unapproved operation?"*.
 
 ### Failures are never swallowed
 
@@ -987,6 +1029,7 @@ SQLAlchemy 2.x over SQLite, migrated with Alembic.
 | `0002_auth_rbac` | Identity, roles, sessions |
 | `0003_phase23_evidence_certificate` | Evidence chain linkage, certificate verification bindings |
 | `0004_audit_chain` | Audit chaining and actor provenance |
+| `0005_target_identity` | Target identity (volume serial, file ID) recorded at analysis |
 
 ### One storage decision worth stating
 
@@ -1011,7 +1054,7 @@ exactly the evidence of integrity that does not exist.
 | Unprivileged API | Destructive authority lives behind an IPC boundary that re-validates independently |
 | No shell path | Six allowlisted operations; execution constructs statically absent and tested |
 | Containment | Service-owned allowed roots; nothing in a request can extend them |
-| TOCTOU closure | Target identity re-checked immediately before mutation |
+| TOCTOU closure | The identity recorded at analysis is re-checked before dispatch, on receipt by the privileged service, and again immediately before mutation. Absence of a recorded identity refuses. |
 | Separation of duties | Requester ≠ approver, enforced against persisted state |
 | Server-derived identity | No endpoint accepts a caller-supplied actor, approver or verifier |
 | Replay resistance | Single-use nonces, atomic check-and-insert, bounded, refuses at ceiling |
@@ -1165,7 +1208,7 @@ multi-worker scope), plus the informational observations above.
 
 | Gate | Result |
 |---|---|
-| Backend pytest | **591 passed, 3 skipped, 1 xfailed** |
+| Backend pytest | **612 passed, 3 skipped, 1 xfailed** |
 | mypy (strict) | **clean, 115 source files** |
 | Frontend Vitest | **221 passed, 0 failed** (21 files) |
 | Frontend typecheck | **clean** |
@@ -1421,7 +1464,7 @@ docs/               OBLIVION_DOCUMENTATION.md (this file) + OPENAPI.yaml (genera
 ```bash
 pip install -r requirements.txt
 alembic upgrade head
-python -m pytest -q                      # 591 passed, 3 skipped, 1 xfailed
+python -m pytest -q                      # 612 passed, 3 skipped, 1 xfailed
 python -m mypy src/oblivion              # clean, 115 files
 python -m ruff check src/oblivion
 python -m uvicorn oblivion.api:app --reload
@@ -1590,7 +1633,7 @@ Every gate produced **exactly** its pre-cleanup result:
 
 | Gate | Before | After |
 |---|---|---|
-| Backend pytest | 562 passed, 2 skipped, 1 xfailed | **591 passed, 3 skipped, 1 xfailed** |
+| Backend pytest | 562 passed, 2 skipped, 1 xfailed | **612 passed, 3 skipped, 1 xfailed** |
 | mypy (strict) | clean, 115 files | **clean, 115 files** |
 | ruff (`src/oblivion`) | 191 pre-existing | **191** |
 | Frontend Vitest | 205 passed | **221 passed** |
@@ -1598,7 +1641,7 @@ Every gate produced **exactly** its pre-cleanup result:
 | Frontend lint | clean | **clean** |
 | Frontend build | OK | **OK** |
 | OpenAPI contract gate | OK, 20 paths | **OK, 20 paths** |
-| Alembic history | 4 revisions to `0004_audit_chain` | **4 revisions, intact** |
+| Alembic history | 4 revisions to `0004_audit_chain` | **5 revisions to `0005_target_identity`, intact** |
 
 No test was weakened, skipped or deleted. No security control was altered. `H:\OBLIVION`, the
 protected reference tree, remains at `b91cc45` with only the pre-existing working-tree changes

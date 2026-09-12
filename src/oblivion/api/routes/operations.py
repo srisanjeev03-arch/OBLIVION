@@ -1,6 +1,7 @@
 """Operation endpoints with Authentication, Approval Gating & Separation of Duties."""
 import datetime
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -21,6 +22,7 @@ from oblivion.api.schemas.operation import (
     OperationPageOut,
 )
 from oblivion.core.audit import (
+    AuditActor,
     AuditEventType,
     AuditLog,
     AuditOutcome,
@@ -34,7 +36,7 @@ from oblivion.core.erasure.engine import ErasureEngine, ErasureMode
 from oblivion.core.erasure.vault import RecoveryVault
 from oblivion.core.policy import PolicyEngine, PolicyError
 from oblivion.core.state.machine import State
-from oblivion.core.safety.paths import SafePathValidator
+from oblivion.core.safety.paths import SafePathValidator, decode_file_id
 from oblivion.persistence.database import get_session_factory
 from oblivion.persistence.models.operation import OperationEventModel
 from oblivion.persistence.models.user import UserModel
@@ -366,6 +368,45 @@ async def approve_operation(
     )
 
 
+def _refuse_execution(
+    *,
+    reason_code: str,
+    message: str,
+    actor: AuditActor,
+    operation_id: str,
+    status_code: int,
+    target_identity: str | None = None,
+    safe_metadata: dict[str, Any] | None = None,
+) -> HTTPException:
+    """Record a declined execution attempt, and return the error to raise.
+
+    Written in a transaction of its own for the same reason a refused approval
+    is: this request is about to fail and roll back, and an attempt to run a
+    destructive operation that was turned away is exactly what an auditor needs
+    to find later. Before this existed, every refusal on this endpoint left no
+    trace at all (audit finding A-1), so the log could not answer "did anyone
+    try to execute an unapproved operation?".
+
+    The event is ``OPERATION_EXECUTION_REFUSED`` with outcome ``REFUSED``, never
+    ``OPERATION_EXECUTED`` with a failed outcome: nothing was executed, and an
+    append-only log must not record an execution that did not happen.
+    """
+    append_independently(
+        get_session_factory(),
+        AuditEventType.OPERATION_EXECUTION_REFUSED,
+        AuditOutcome.REFUSED,
+        actor,
+        operation_id=operation_id,
+        target_identity=target_identity,
+        summary=f"Execution refused before any destructive work: {reason_code}.",
+        safe_metadata={"reason_code": reason_code, **(safe_metadata or {})},
+    )
+    return HTTPException(
+        status_code=status_code,
+        detail={"error_code": reason_code, "message": message},
+    )
+
+
 @router.post("/{operation_id}/execute", response_model=OperationOut, status_code=status.HTTP_200_OK)
 async def execute_operation_endpoint(
     operation_id: str,
@@ -380,38 +421,102 @@ async def execute_operation_endpoint(
     Requires OPERATOR role / operation.execute permission.
     Enforces that operation was approved prior to execution.
     """
+    # Resolved once: every refusal below records who was turned away, and the
+    # actor must come from the authenticated session, never from the request.
+    actor = resolve_audit_actor(current_user, db)
+
     repo = OperationRepository(db)
     op = repo.get_operation(operation_id)
     if not op:
-        raise HTTPException(
+        raise _refuse_execution(
+            reason_code="OPERATION_NOT_FOUND",
+            message=f"Operation '{operation_id}' not found",
+            actor=actor,
+            operation_id=operation_id,
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error_code": "OPERATION_NOT_FOUND", "message": f"Operation '{operation_id}' not found"},
         )
 
     # 1. Approval gating check
     if op.state != "READY" or op.approved_by is None:
-        raise HTTPException(
+        raise _refuse_execution(
+            reason_code="OPERATION_NOT_APPROVED",
+            message=(
+                f"Operation '{operation_id}' must be in READY state and approved prior "
+                f"to execution (current state: {op.state})"
+            ),
+            actor=actor,
+            operation_id=operation_id,
             status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error_code": "OPERATION_NOT_APPROVED",
-                "message": f"Operation '{operation_id}' must be in READY state and approved prior to execution (current state: {op.state})",
-            },
+            safe_metadata={"state": op.state, "approved": op.approved_by is not None},
         )
 
     target = repo.get_target(op.target_id)
     if not target:
-        raise HTTPException(
+        raise _refuse_execution(
+            reason_code="TARGET_NOT_FOUND",
+            message=f"Target '{op.target_id}' not found",
+            actor=actor,
+            operation_id=operation_id,
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error_code": "TARGET_NOT_FOUND", "message": f"Target '{op.target_id}' not found"},
+            safe_metadata={"target_id": op.target_id},
         )
 
     # 2. Revalidate Target on filesystem
     is_dir_tree = op.mode == "COMPLETE_ERASURE"
     validation = validator.validate_target(target.canonical_path, is_directory_tree=is_dir_tree)
     if not validation["valid"]:
-        raise HTTPException(
+        raise _refuse_execution(
+            reason_code="TARGET_INVALID",
+            message="; ".join(validation.get("errors", ["Target path invalid"])),
+            actor=actor,
+            operation_id=operation_id,
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error_code": "TARGET_INVALID", "message": "; ".join(validation.get("errors", ["Target path invalid"]))},
+            target_identity=target.canonical_path,
+        )
+
+    # 2b. Bind execution to the identity recorded when the target was analysed.
+    #
+    # This value predates the approval, which is the whole point. The previous
+    # revision read the "expected" identity from the filesystem a few lines below
+    # and handed it to the engine, so the engine compared the object with itself
+    # and a file swapped in after approval was erased as though it were the
+    # approved one (audit finding A-2).
+    expected_serial = target.volume_serial
+    expected_file_id = decode_file_id(target.file_id)
+
+    if expected_serial is None or expected_file_id is None:
+        raise _refuse_execution(
+            reason_code="TARGET_IDENTITY_UNAVAILABLE",
+            message=(
+                "No target identity was recorded when this target was analysed, so the "
+                "object on disk cannot be checked against the one that was approved. "
+                "Re-analyse the target before executing."
+            ),
+            actor=actor,
+            operation_id=operation_id,
+            status_code=status.HTTP_409_CONFLICT,
+            target_identity=target.canonical_path,
+            safe_metadata={
+                "expected_volume_serial_present": expected_serial is not None,
+                "expected_file_id_present": expected_file_id is not None,
+            },
+        )
+
+    if not validator.revalidate_handle(
+        target.canonical_path, expected_serial, expected_file_id
+    ):
+        raise _refuse_execution(
+            reason_code="TARGET_IDENTITY_MISMATCH",
+            message=(
+                "The object at this path is not the object that was approved: its "
+                "identity no longer matches the one recorded at analysis. Refusing "
+                "rather than erasing a substituted object."
+            ),
+            actor=actor,
+            operation_id=operation_id,
+            status_code=status.HTTP_409_CONFLICT,
+            target_identity=target.canonical_path,
+            safe_metadata={"target_identity_verified": False},
         )
 
     mode_map = {
@@ -427,17 +532,19 @@ async def execute_operation_endpoint(
     if erasure_mode == ErasureMode.CONTROLLED_RECOVERABLE:
         engine.set_vault(vault, vault_key)
 
-    target_serial = validator.get_volume_serial(target.canonical_path) or "UNKNOWN"
-    target_file_id = validator._get_file_id(target.canonical_path)
-
-    # 4. Execute operation
+    # 4. Execute operation.
+    #
+    # The engine revalidates the handle itself immediately before it acts. It is
+    # given the identity recorded at analysis - not one read from disk here - so
+    # that its check compares the object against what was approved rather than
+    # against itself.
     op.executed_by = current_user.id
     op_result = engine.execute_operation(
         mode=erasure_mode,
         operation_id=operation_id,
         target_path=target.canonical_path,
-        target_serial=target_serial,
-        target_file_id=target_file_id,
+        target_serial=expected_serial,
+        target_file_id=expected_file_id,
     )
 
     # 5. Update DB State

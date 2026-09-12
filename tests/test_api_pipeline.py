@@ -25,6 +25,7 @@ from oblivion.certificate.trust_model import ENV_TRUSTED_SIGNERS
 from oblivion.core.state.machine import State
 from oblivion.persistence.database import get_session_factory, init_db
 from oblivion.persistence.repositories.operation_repo import OperationRepository
+from tests.fixtures import observed_identity
 from oblivion.privileged import client as client_module
 
 SELECTIVE_POLICY = "ERASURE.LOGICAL.SELECTIVE.V1"
@@ -75,6 +76,10 @@ def create_operation(target_path, *, state=State.READY.name, approver=APPROVER):
             path=str(target_path),
             canonical_path=str(target_path),
             target_type="file",
+            # As the analyze route records it: the erase stage checks the object
+            # on disk against this identity, so a target without one can never
+            # be executed against.
+            **observed_identity(target_path),
         )
         repo.create_operation(
             operation_id=f"op_{suffix}",

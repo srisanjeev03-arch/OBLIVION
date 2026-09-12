@@ -24,6 +24,24 @@ class TargetModel(Base):
     storage_profile_id: Mapped[str | None] = mapped_column(String(64), index=True)
     discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
+    # --- target identity, observed at analysis and binding on execution -------
+    #
+    # These two columns are what makes an approval mean something. The engine and
+    # the privileged service both compare a caller-supplied "expected" identity
+    # against the object actually on disk; before these existed the caller read
+    # that expected value from the filesystem moments before acting, so the
+    # comparison was between the object and itself and a file substituted after
+    # approval was erased regardless (audit finding A-2).
+    #
+    # Recorded once, when the target is analysed, and never rewritten: the whole
+    # point is that the value predates the approval it is checked against.
+    # Nullable because a non-Windows host cannot observe either value - callers
+    # must therefore treat absence as "identity not established" and fail closed,
+    # never as "identity matches".
+    volume_serial: Mapped[str | None] = mapped_column(String(64))
+    #: ``SafePathValidator._get_file_id`` as text; see ``encode_file_id``.
+    file_id: Mapped[str | None] = mapped_column(String(64))
+
     operations: Mapped[list["OperationModel"]] = relationship(back_populates="target")
 
 

@@ -72,6 +72,11 @@ class AuditEventType(str, Enum):
     OPERATION_APPROVED = "OPERATION_APPROVED"
     OPERATION_APPROVAL_REFUSED = "OPERATION_APPROVAL_REFUSED"
     OPERATION_EXECUTED = "OPERATION_EXECUTED"
+    #: Execution was asked for and declined before any destructive work began.
+    #: Distinct from ``OPERATION_EXECUTED`` with a failed outcome, which asserts
+    #: that execution was entered and did not complete. A declined request must
+    #: never be recorded as an execution that went wrong (audit finding A-1).
+    OPERATION_EXECUTION_REFUSED = "OPERATION_EXECUTION_REFUSED"
     OPERATION_CANCELLED = "OPERATION_CANCELLED"
     OPERATION_STATE_CHANGED = "OPERATION_STATE_CHANGED"
 

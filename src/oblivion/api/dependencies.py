@@ -20,6 +20,7 @@ from oblivion.core.audit import (
     AuditEventType,
     AuditLog,
     AuditOutcome,
+    append_independently,
 )
 from oblivion.core.auth.passwords import hash_session_token
 from oblivion.core.auth.rbac import has_permission
@@ -129,6 +130,20 @@ def require_permission(required_permission: str) -> Callable[..., UserModel]:
         repo = UserRepository(db)
         roles = repo.get_user_role_names(current_user.id)
         if not has_permission(roles, required_permission):
+            # An authenticated principal reaching for something they may not
+            # have is exactly what an auditor looks for, and until now it left
+            # no trace: ``AUTH_ACCESS_DENIED`` was defined and never written, so
+            # a refused attempt on a destructive endpoint was invisible (part of
+            # audit finding A-1). Committed separately because this request is
+            # about to 403 and roll back.
+            append_independently(
+                get_session_factory(),
+                AuditEventType.AUTH_ACCESS_DENIED,
+                AuditOutcome.REFUSED,
+                resolve_audit_actor(current_user, db),
+                summary=f"Access denied: {required_permission} is not held.",
+                safe_metadata={"required_permission": required_permission},
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
