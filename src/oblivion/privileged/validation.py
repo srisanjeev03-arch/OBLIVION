@@ -225,11 +225,24 @@ class PrivilegedRequestValidator:
         canonical: str,
         volume_serial: str | None,
     ) -> tuple[list[str], tuple[int, int, int] | None]:
-        """Confirm the caller's named object is the object now present.
+        """Confirm the object now at the path is the object that was approved.
 
-        This is the pre-flight check. The erasure engine performs the same
-        comparison again immediately before it acts, which is the one that
-        actually closes the TOCTOU window; this one refuses early and cheaply.
+        ``request.expected_volume_serial`` and ``request.expected_file_id`` are
+        the identity recorded when the target was analysed and persisted before
+        the operation was approved; callers read them from the target record,
+        never from the filesystem at execution time. This method compares the
+        identity of the object currently at ``canonical`` against them, and any
+        absence or mismatch is a refusal - it fails closed.
+
+        This is what binds execution to the approved target: an object
+        substituted at the same path after approval is refused here, and the
+        erasure engine repeats the comparison immediately before it acts.
+
+        It does not eliminate every time-of-check/time-of-use race. The identity
+        is read through a handle that is released before the destructive call,
+        which then operates by path, so a narrow window remains between the last
+        successful comparison and that call. The check substantially reduces
+        target substitution; it is not a proof that none is possible.
         """
         refusals: list[str] = []
 

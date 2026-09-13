@@ -459,11 +459,23 @@ leaves the recorded identity alone, so nothing can refresh the expectation to ma
 
 Identity is then checked at three points, and they answer different questions:
 
-| Where | Compares | Closes |
+| Where | Compares | Protects against |
 |---|---|---|
-| API route, before dispatch | persisted identity vs. object now on disk | the gap between **approval and execution** |
-| Privileged service, on receipt | the request's expected identity vs. object now on disk | the gap between **API process and privileged process** |
-| Erasure engine, immediately before unlinking | the identity it was given vs. object now on disk | the gap between **validation and the syscall** |
+| API route, before dispatch | persisted identity vs. object now on disk | an object substituted between **approval and execution** |
+| Privileged service, on receipt | the request's expected identity vs. object now on disk | a substitution between the **API process and the privileged process** |
+| Erasure engine, immediately before unlinking | the identity it was given vs. object now on disk | a substitution up to the **final pre-deletion check** — narrowed, not eliminated |
+
+### Approval-time binding is not complete TOCTOU elimination
+
+These checks provide **approval-time target binding**: an operation can only destroy the object
+whose identity was recorded before it was approved, and a mismatch or an absent identity refuses.
+
+They do **not** eliminate every time-of-check/time-of-use race. Each comparison reads the identity
+through a handle that is released before the destructive call, and that call then operates by path.
+A narrow window therefore remains between the last successful comparison and the syscall. The
+checks substantially reduce target substitution; they are not a proof that none is possible.
+Closing that window entirely would require holding the validated handle through the deletion,
+which this build does not do.
 
 Absence fails closed. A target with no recorded identity — a row written before this was
 introduced, or a host that cannot observe one — is refused with `TARGET_IDENTITY_UNAVAILABLE`
@@ -1054,7 +1066,7 @@ exactly the evidence of integrity that does not exist.
 | Unprivileged API | Destructive authority lives behind an IPC boundary that re-validates independently |
 | No shell path | Six allowlisted operations; execution constructs statically absent and tested |
 | Containment | Service-owned allowed roots; nothing in a request can extend them |
-| TOCTOU closure | The identity recorded at analysis is re-checked before dispatch, on receipt by the privileged service, and again immediately before mutation. Absence of a recorded identity refuses. |
+| Approval-time target binding | The identity recorded at analysis is re-checked before dispatch, on receipt by the privileged service, and again immediately before mutation. A mismatch or an absent identity refuses. This narrows the time-of-check/time-of-use window but does not eliminate it: the destructive call operates by path after the checking handle is released (§14). |
 | Separation of duties | Requester ≠ approver, enforced against persisted state |
 | Server-derived identity | No endpoint accepts a caller-supplied actor, approver or verifier |
 | Replay resistance | Single-use nonces, atomic check-and-insert, bounded, refuses at ceiling |
