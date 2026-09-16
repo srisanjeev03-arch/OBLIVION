@@ -52,6 +52,18 @@ OPERATION_PERMISSION: Final[dict[PrivilegedOperation, str]] = {
 }
 
 
+def _is_file_id(value: object) -> bool:
+    """A file identity is exactly three non-negative integers (never booleans)."""
+    return (
+        isinstance(value, tuple)
+        and len(value) == 3
+        and all(
+            isinstance(part, int) and not isinstance(part, bool) and part >= 0
+            for part in value
+        )
+    )
+
+
 @dataclass(frozen=True)
 class ValidationOutcome:
     """The privileged side's own answer about a request.
@@ -246,32 +258,49 @@ class PrivilegedRequestValidator:
         """
         refusals: list[str] = []
 
-        if request.expected_volume_serial is None:
+        expected_serial = request.expected_volume_serial
+        if not isinstance(expected_serial, str) or not expected_serial.strip():
             refusals.append(
                 "Destructive request states no expected volume serial; target "
                 "identity cannot be established (fail-closed)"
             )
         elif (
             volume_serial is not None
-            and request.expected_volume_serial != volume_serial
+            and expected_serial != volume_serial
         ):
             refusals.append(
                 "Expected volume serial does not match the volume now holding the "
                 "target; refusing rather than acting on a substituted volume"
             )
 
+        # Both halves are required. Without an expected file identity the only
+        # value available is the one read from disk now, and comparing the object
+        # with itself would accept a file substituted after approval (PS-2).
+        expected_file_id = request.expected_file_id
+        if expected_file_id is None:
+            refusals.append(
+                "Destructive request states no expected file identity; target "
+                "identity cannot be established (fail-closed)"
+            )
+            return refusals, None
+        if not _is_file_id(expected_file_id):
+            refusals.append(
+                "Destructive request carries a malformed expected file identity; "
+                "refusing rather than guessing what was approved"
+            )
+            return refusals, None
+
         current_file_id = self._validator._get_file_id(canonical)
-        if request.expected_file_id is not None:
-            if current_file_id is None:
-                refusals.append(
-                    "Caller named a file identity but none can be read now; "
-                    "refusing rather than assuming it still matches"
-                )
-            elif tuple(current_file_id) != tuple(request.expected_file_id):
-                refusals.append(
-                    "File identity changed between request and validation; the "
-                    "object at this path is not the object the caller approved"
-                )
+        if current_file_id is None:
+            refusals.append(
+                "Caller named a file identity but none can be read now; "
+                "refusing rather than assuming it still matches"
+            )
+        elif tuple(current_file_id) != tuple(expected_file_id):
+            refusals.append(
+                "File identity changed between request and validation; the "
+                "object at this path is not the object the caller approved"
+            )
         return refusals, current_file_id
 
     def _check_destination(
