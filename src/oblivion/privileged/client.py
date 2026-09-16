@@ -38,6 +38,7 @@ from oblivion.privileged.transport import (
 __all__ = [
     "PrivilegedClient",
     "PrivilegedClientError",
+    "PrivilegedResponseRejectedError",
     "ServiceUnavailableError",
     "new_nonce",
 ]
@@ -45,6 +46,10 @@ __all__ = [
 
 class PrivilegedClientError(Exception):
     """Raised when a request could not be formed or its reply not understood."""
+
+
+class PrivilegedResponseRejectedError(PrivilegedClientError):
+    """A reply arrived but is not an authentic answer to the request sent."""
 
 
 def new_nonce() -> str:
@@ -104,7 +109,7 @@ class PrivilegedClient:
         try:
             return self._authenticator.verify_response(request, payload)
         except ResponseAuthenticationError as exc:
-            raise PrivilegedClientError(
+            raise PrivilegedResponseRejectedError(
                 f"Privileged service response rejected: {exc}"
             ) from None
 

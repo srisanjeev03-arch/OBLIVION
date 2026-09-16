@@ -392,6 +392,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationOut'
+        '409':
+          description: Execution refused before any destructive work. The operation is not READY and approved -
+            including one already in flight or awaiting reconciliation (OPERATION_NOT_APPROVED) - stopped being
+            READY before it could be claimed (OPERATION_NOT_READY), its dispatch could not be recorded (DISPATCH_NOT_RECORDED),
+            or its target identity is missing or no longer matches.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -551,6 +560,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PipelineResultOut'
+        '409':
+          description: Not run. The operation is already concluded (OPERATION_ALREADY_CONCLUDED), was dispatched
+            and is still in flight (OPERATION_IN_FLIGHT), awaits reconciliation (OPERATION_RECONCILIATION_REQUIRED),
+            stopped being READY before this run could claim it (OPERATION_NOT_READY), or references a missing target
+            (TARGET_NOT_FOUND). Nothing was dispatched by this request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: 'OPERATION_OUTCOME_UNESTABLISHED: the destructive step was dispatched but its outcome could
+            not be established. The operation is now RECONCILIATION_REQUIRED and will not be run again until reconciled;
+            `details` carries operation_id, state and reason_code.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1447,6 +1473,25 @@ components:
       - result
       - detail
       title: DimensionResultOut
+    ErrorResponse:
+      properties:
+        error_code:
+          type: string
+          title: Error Code
+        message:
+          type: string
+          title: Message
+        details:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Details
+      type: object
+      required:
+      - error_code
+      - message
+      title: ErrorResponse
     EvidenceVerificationRequest:
       properties:
         evidence:

@@ -8,8 +8,14 @@ See ``docs/OBLIVION_DOCUMENTATION.md §5`` for what each stage establishes and, 
 importantly, what it does not.
 """
 
+from oblivion.core.pipeline.journal import (
+    DispatchConflictError,
+    DispatchJournal,
+    DispatchJournalError,
+)
 from oblivion.core.pipeline.orchestrator import (
     ClosedLoopPipeline,
+    DispatchOutcomeUnestablished,
     PipelineRequest,
     PipelineResult,
     Stage,
@@ -19,6 +25,10 @@ from oblivion.core.pipeline.orchestrator import (
 
 __all__ = [
     "ClosedLoopPipeline",
+    "DispatchConflictError",
+    "DispatchJournal",
+    "DispatchJournalError",
+    "DispatchOutcomeUnestablished",
     "PipelineRequest",
     "PipelineResult",
     "Stage",

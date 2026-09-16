@@ -1,5 +1,6 @@
 """Operation endpoints with Authentication, Approval Gating & Separation of Duties."""
 import datetime
+import logging
 import uuid
 from typing import Any
 
@@ -15,6 +16,7 @@ from oblivion.api.dependencies import (
     get_vault_key,
     require_permission,
 )
+from oblivion.api.schemas.error import ErrorResponse
 from oblivion.api.schemas.operation import (
     CreateOperationRequest,
     OperationEventOut,
@@ -34,13 +36,22 @@ from oblivion.core.auth.sod import (
 )
 from oblivion.core.erasure.engine import ErasureEngine, ErasureMode
 from oblivion.core.erasure.vault import RecoveryVault
+from oblivion.core.pipeline.journal import (
+    DispatchConflictError,
+    DispatchFacts,
+    DispatchJournal,
+    DispatchJournalError,
+)
 from oblivion.core.policy import PolicyEngine, PolicyError
 from oblivion.core.state.machine import State
+from oblivion.core.state.reconciliation import INTERRUPTIBLE_STATES
 from oblivion.core.safety.paths import SafePathValidator, decode_file_id
 from oblivion.persistence.database import get_session_factory
 from oblivion.persistence.models.operation import OperationEventModel
 from oblivion.persistence.models.user import UserModel
 from oblivion.persistence.repositories.operation_repo import OperationRepository
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/operations", tags=["operations"])
 
@@ -301,6 +312,20 @@ async def approve_operation(
             detail={"error_code": "OPERATION_STATE_INVALID", "message": f"Cannot approve operation in terminal state '{op.state}'"},
         )
 
+    # A dispatched operation that has not concluded must not be put back into
+    # READY: that would make an act of unknown outcome runnable again.
+    if op.state in INTERRUPTIBLE_STATES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_code": "OPERATION_STATE_INVALID",
+                "message": (
+                    f"Cannot approve operation in state '{op.state}'; it was "
+                    "dispatched and has not been concluded"
+                ),
+            },
+        )
+
     if op.state == "READY":
         return OperationOut.model_validate(op)
 
@@ -407,7 +432,24 @@ def _refuse_execution(
     )
 
 
-@router.post("/{operation_id}/execute", response_model=OperationOut, status_code=status.HTTP_200_OK)
+@router.post(
+    "/{operation_id}/execute",
+    response_model=OperationOut,
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": (
+                "Execution refused before any destructive work. The operation is not "
+                "READY and approved - including one already in flight or awaiting "
+                "reconciliation (OPERATION_NOT_APPROVED) - stopped being READY before "
+                "it could be claimed (OPERATION_NOT_READY), its dispatch could not be "
+                "recorded (DISPATCH_NOT_RECORDED), or its target identity is missing "
+                "or no longer matches."
+            ),
+        },
+    },
+)
 async def execute_operation_endpoint(
     operation_id: str,
     current_user: UserModel = Depends(require_permission("operation.execute")),
@@ -526,7 +568,75 @@ async def execute_operation_endpoint(
     }
     erasure_mode = mode_map[op.mode]
 
-    # 3. Initialize Erasure Engine
+    # 3. Journal the dispatch in its own transaction before anything destructive
+    # runs. The engine's events and this route's result are written in the
+    # request transaction; if that is lost, the operation stays in ERASING (or
+    # is moved to RECONCILIATION_REQUIRED below) instead of silently READY.
+    journal = DispatchJournal(get_session_factory(), actor)
+    try:
+        journal.record_dispatch(
+            DispatchFacts(
+                operation_id=operation_id,
+                privileged_operation=f"in_process:{erasure_mode.name}",
+                mode=op.mode,
+                policy_id=op.policy_id or "",
+                target_identity=target.canonical_path,
+                target_type=target.target_type,
+                expected_volume_serial=expected_serial,
+                expected_file_id=expected_file_id,
+                executed_by=current_user.id,
+            )
+        )
+    except DispatchJournalError as exc:
+        raise _refuse_execution(
+            reason_code=(
+                "OPERATION_NOT_READY"
+                if isinstance(exc, DispatchConflictError)
+                else "DISPATCH_NOT_RECORDED"
+            ),
+            message=str(exc),
+            actor=actor,
+            operation_id=operation_id,
+            status_code=status.HTTP_409_CONFLICT,
+            target_identity=target.canonical_path,
+        ) from None
+
+    try:
+        return _execute_dispatched(
+            db, op, target.canonical_path, erasure_mode, expected_serial,
+            expected_file_id, validator, vault, vault_key, current_user,
+        )
+    except Exception as exc:
+        db.rollback()
+        try:
+            journal.record_outcome_unestablished(
+                reason_code="RESULT_NOT_RECORDED", error_type=type(exc).__name__
+            )
+        except Exception:
+            # The operation stays ERASING, which is itself an unresolved state:
+            # nothing can re-run, re-approve or cancel it, and the reconciler
+            # treats it as interrupted. The original failure still propagates.
+            logger.exception(
+                "operation.execute.uncertainty_not_recorded operation=%s", operation_id
+            )
+        raise
+
+
+def _execute_dispatched(
+    db: Session,
+    op: Any,
+    target_path: str,
+    erasure_mode: ErasureMode,
+    expected_serial: str,
+    expected_file_id: tuple[int, int, int],
+    validator: SafePathValidator,
+    vault: RecoveryVault,
+    vault_key: bytes,
+    current_user: UserModel,
+) -> OperationOut:
+    """Run the in-process engine for an already-journalled dispatch and record it."""
+    operation_id = op.id
+
     emitter = DatabaseEventEmitter(session=db)
     engine = ErasureEngine(validator=validator, event_emitter=emitter)
     if erasure_mode == ErasureMode.CONTROLLED_RECOVERABLE:
@@ -542,7 +652,7 @@ async def execute_operation_endpoint(
     op_result = engine.execute_operation(
         mode=erasure_mode,
         operation_id=operation_id,
-        target_path=target.canonical_path,
+        target_path=target_path,
         target_serial=expected_serial,
         target_file_id=expected_file_id,
     )
@@ -565,7 +675,7 @@ async def execute_operation_endpoint(
         AuditOutcome.SUCCEEDED if final_state == "COMPLETED" else AuditOutcome.FAILED,
         resolve_audit_actor(current_user, db),
         operation_id=operation_id,
-        target_identity=target.canonical_path,
+        target_identity=target_path,
         summary=f"Executed the approved operation; engine reported {final_state}.",
         safe_metadata={
             "final_state": final_state,
@@ -575,7 +685,9 @@ async def execute_operation_endpoint(
             "error_code": op.error_code,
         },
     )
-    db.flush()
+    # Committed here rather than by the dependency, so that a failed commit is
+    # still inside the caller's reconciliation handling.
+    db.commit()
 
     return OperationOut(
         id=op.id,
@@ -646,8 +758,9 @@ async def cancel_operation(
             detail={"error_code": "OPERATION_STATE_INVALID", "message": f"Cannot cancel operation in terminal state '{op.state}'"},
         )
 
-    irreversible_states = {"ERASING", "VERIFYING"}
-    if op.state in irreversible_states:
+    # Includes RECONCILIATION_REQUIRED: cancelling records "cancelled before
+    # execution", which is not true of an operation that was dispatched.
+    if op.state in INTERRUPTIBLE_STATES:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"error_code": "OPERATION_STATE_INVALID", "message": f"Cannot cancel operation during active state '{op.state}'"},

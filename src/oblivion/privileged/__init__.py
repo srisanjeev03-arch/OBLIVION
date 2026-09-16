@@ -11,6 +11,7 @@ Application code should reach privileged operations through
 from oblivion.privileged.client import (
     PrivilegedClient,
     PrivilegedClientError,
+    PrivilegedResponseRejectedError,
     new_nonce,
 )
 from oblivion.privileged.protocol import (
@@ -73,6 +74,7 @@ __all__ = [
     "PrivilegedRequest",
     "PrivilegedRequestValidator",
     "PrivilegedResponse",
+    "PrivilegedResponseRejectedError",
     "PrivilegedService",
     "PrivilegedServiceError",
     "ProtocolError",

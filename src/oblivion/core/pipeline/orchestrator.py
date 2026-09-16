@@ -40,7 +40,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy.orm import Session
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from oblivion.certificate.issuer import CertificateIssuer, IssuanceRequest
 from oblivion.certificate.keys import SigningKeyManager
@@ -53,6 +54,7 @@ from oblivion.core.assurance.models import (
     EvidenceCoverage,
     ResidualFinding,
 )
+from oblivion.core.audit import AuditActor
 from oblivion.core.baseline.manager import BaselineManager
 from oblivion.core.discovery.analyzer import TargetAnalyzer
 from oblivion.core.dryrun.planner import DryRunPlanner
@@ -63,17 +65,41 @@ from oblivion.core.evidence.generator import (
     Unavailable,
 )
 from oblivion.core.evidence.record import TargetDescriptor
+from oblivion.core.pipeline.journal import (
+    DispatchConflictError,
+    DispatchFacts,
+    DispatchJournal,
+    DispatchJournalError,
+)
 from oblivion.core.recovery.testing import RecoveryTester
 from oblivion.core.residual.scanners import ResidualScanSuite
 from oblivion.core.safety.paths import SafePathValidator
 from oblivion.core.state.machine import State
+from oblivion.core.state.reconciliation import INTERRUPTIBLE_STATES
 from oblivion.persistence.repositories.certificate_repo import CertificateRepository
 from oblivion.persistence.repositories.operation_repo import OperationRepository
-from oblivion.privileged.client import PrivilegedClient
+from oblivion.privileged.client import PrivilegedClient, PrivilegedResponseRejectedError
 from oblivion.privileged.protocol import PrivilegedOperation, ResponseStatus
 from oblivion.privileged.transport import ServiceUnavailableError
 
 logger = logging.getLogger(__name__)
+
+
+class DispatchOutcomeUnestablished(Exception):
+    """A destructive step was dispatched and its result could not be established.
+
+    Raised only after the operation has been durably moved to
+    ``RECONCILIATION_REQUIRED``. The pipeline stops: nothing after the erase can
+    be measured honestly against an outcome nobody knows.
+    """
+
+    def __init__(self, operation_id: str, reason_code: str) -> None:
+        super().__init__(
+            f"Operation {operation_id}: the destructive step was dispatched but its "
+            f"outcome could not be established ({reason_code}); reconciliation required."
+        )
+        self.operation_id = operation_id
+        self.reason_code = reason_code
 
 
 class Stage(str, Enum):
@@ -243,6 +269,7 @@ class ClosedLoopPipeline:
         key_manager: SigningKeyManager | None = None,
         trust_store: TrustStore | None = None,
         signer_id: str = "oblivion-issuer",
+        journal: DispatchJournal | None = None,
     ) -> None:
         self._session = session
         self._validator = validator
@@ -250,6 +277,8 @@ class ClosedLoopPipeline:
         self._key_manager = key_manager
         self._trust_store = trust_store
         self._signer_id = signer_id
+        self._injected_journal = journal
+        self._journal: DispatchJournal | None = None
 
         # The baseline analyser must use *this* pipeline's validator. Left to
         # its default, BaselineManager builds a TargetAnalyzer with a fresh
@@ -264,7 +293,14 @@ class ClosedLoopPipeline:
     # -- the loop --------------------------------------------------------
 
     def run(self, request: PipelineRequest) -> PipelineResult:
-        """Run the whole loop, recording every stage."""
+        """Run the whole loop, recording every stage.
+
+        Raises :class:`DispatchOutcomeUnestablished` when the destructive step
+        was sent but its result could not be established, and
+        :class:`~oblivion.core.pipeline.journal.DispatchConflictError` when the
+        operation stopped being ``READY`` before this run could claim it.
+        """
+        self._journal = self._injected_journal or self._default_journal()
         started_at = datetime.now(UTC)
         result = PipelineResult(
             operation_id=request.operation_id, target_identity=request.target_path
@@ -590,6 +626,33 @@ class ClosedLoopPipeline:
             )
             return None
 
+        journal = self._require_journal()
+        try:
+            journal.record_dispatch(
+                DispatchFacts(
+                    operation_id=request.operation_id,
+                    privileged_operation=operation.value,
+                    mode=request.mode,
+                    policy_id=request.policy_id,
+                    target_identity=request.target_path,
+                    target_type=request.target_type,
+                    expected_volume_serial=serial,
+                    expected_file_id=file_id,
+                    executed_by=request.actor_id,
+                )
+            )
+        except DispatchConflictError:
+            raise
+        except DispatchJournalError as exc:
+            result.stages.append(
+                StageOutcome(
+                    Stage.ERASE,
+                    StageStatus.REFUSED,
+                    f"Nothing was dispatched: {exc}",
+                )
+            )
+            return None
+
         try:
             response = self._privileged.request(
                 operation,
@@ -603,6 +666,8 @@ class ClosedLoopPipeline:
                 expected_file_id=file_id,
             )
         except ServiceUnavailableError as exc:
+            # Raised only when the pipe could not be opened, so the request was
+            # never written and the outcome is known: nothing happened.
             result.stages.append(
                 StageOutcome(
                     Stage.ERASE,
@@ -611,6 +676,16 @@ class ClosedLoopPipeline:
                 )
             )
             return None
+        except Exception as exc:  # noqa: BLE001 - after dispatch, any failure is an unknown outcome
+            reason_code = (
+                "PRIVILEGED_RESPONSE_REJECTED"
+                if isinstance(exc, PrivilegedResponseRejectedError)
+                else "PRIVILEGED_EXCHANGE_FAILED"
+            )
+            journal.record_outcome_unestablished(
+                reason_code=reason_code, error_type=type(exc).__name__
+            )
+            raise DispatchOutcomeUnestablished(request.operation_id, reason_code) from exc
 
         if response.status is not ResponseStatus.COMPLETED:
             result.stages.append(
@@ -1094,9 +1169,41 @@ class ClosedLoopPipeline:
             return State.FAILED.name
         return State.COMPLETED.name
 
+    def _default_journal(self) -> DispatchJournal:
+        bind = self._session.get_bind()
+        if not isinstance(bind, Engine):
+            raise TypeError(
+                "The pipeline session is bound to a connection, so an independent "
+                "journal transaction cannot be opened from it; pass a DispatchJournal."
+            )
+        return DispatchJournal(
+            sessionmaker(bind=bind, expire_on_commit=False),
+            AuditActor.system("closed_loop_pipeline"),
+        )
+
+    def _require_journal(self) -> DispatchJournal:
+        if self._journal is None:  # pragma: no cover - set at the start of run()
+            raise RuntimeError("The dispatch journal is only available during run()")
+        return self._journal
+
     def _persist_state(self, request: PipelineRequest, result: PipelineResult) -> None:
         operation = OperationRepository(self._session).get_operation(
             request.operation_id
         )
-        if operation is not None:
-            operation.state = result.final_state
+        if operation is None:
+            return
+        self._session.refresh(operation)
+        if (
+            operation.state in INTERRUPTIBLE_STATES
+            and not self._require_journal().dispatched
+        ):
+            # Another run dispatched this operation, or it awaits reconciliation.
+            # This run established nothing about it and must not overwrite that.
+            logger.warning(
+                "pipeline.state.not_overwritten operation=%s state=%s result=%s",
+                operation.id,
+                operation.state,
+                result.final_state,
+            )
+            return
+        operation.state = result.final_state

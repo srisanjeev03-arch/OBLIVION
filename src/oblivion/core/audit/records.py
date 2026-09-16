@@ -79,6 +79,16 @@ class AuditEventType(str, Enum):
     OPERATION_EXECUTION_REFUSED = "OPERATION_EXECUTION_REFUSED"
     OPERATION_CANCELLED = "OPERATION_CANCELLED"
     OPERATION_STATE_CHANGED = "OPERATION_STATE_CHANGED"
+    #: The destructive step is about to be dispatched. Committed on its own,
+    #: before the request is sent, so the attempt outlives any later rollback.
+    #: It asserts that dispatch began - not that it arrived or what it did.
+    OPERATION_DISPATCH_STARTED = "OPERATION_DISPATCH_STARTED"
+    #: A dispatched destructive step whose result could not be established
+    #: (response rejected, exchange broken, or result lost before it was
+    #: recorded). The outcome field is FAILED because *establishing the result*
+    #: failed; the destructive step itself is recorded as unknown, and the
+    #: operation is left in RECONCILIATION_REQUIRED.
+    OPERATION_OUTCOME_UNESTABLISHED = "OPERATION_OUTCOME_UNESTABLISHED"
 
     # --- the closed loop --------------------------------------------------
     PIPELINE_STARTED = "PIPELINE_STARTED"
