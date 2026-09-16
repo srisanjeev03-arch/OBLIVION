@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
+﻿import { useCallback, useEffect, useMemo, type ReactNode } from 'react'
 import { useAuthStore } from './store'
 import {
   backendContractSessionSource,
@@ -38,15 +38,18 @@ export function AuthProvider({
   )
 
   // --- mount: restore only, never authenticate ------------------------------------------
-  const restoreAttempted = useRef(false)
+  // No "already attempted" ref: StrictMode mounts, unmounts and re-mounts in development, and a
+  // ref survives that, so the second mount would skip restore() while the first mount's result is
+  // discarded as cancelled - leaving the console stuck on AUTHENTICATING. Each mount restores; the
+  // `cancelled` flag keeps a stale first-mount result from winning.
   useEffect(() => {
-    if (restoreAttempted.current) return
-    restoreAttempted.current = true
+    let cancelled = false
 
     const opening = useAuthStore.getState()
-    opening.setAuthState('AUTHENTICATING')
+    if (opening.authState === 'UNKNOWN') {
+      opening.setAuthState('AUTHENTICATING')
+    }
 
-    let cancelled = false
     void source
       .restore()
       .then((resolved) => {

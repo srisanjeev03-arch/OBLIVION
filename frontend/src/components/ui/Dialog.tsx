@@ -68,7 +68,7 @@ export function Dialog({
         className,
       )}
     >
-      <div className="flex items-start justify-between gap-4 border-b border-line px-4 py-3">
+      <div className="flex items-start justify-between gap-4 border-b border-line-strong px-4 py-3">
         <div className="min-w-0">
           <h2 id={titleId} className="text-sm font-semibold">
             {title}
@@ -85,7 +85,7 @@ export function Dialog({
       </div>
       {children && <div className="px-4 py-3">{children}</div>}
       {footer && (
-        <div className="flex items-center justify-end gap-2 border-t border-line px-4 py-3">
+        <div className="flex items-center justify-end gap-2 border-t border-line-strong px-4 py-3">
           {footer}
         </div>
       )}

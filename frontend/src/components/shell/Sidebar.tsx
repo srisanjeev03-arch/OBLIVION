@@ -27,15 +27,15 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
     <aside
       aria-label="Primary"
       className={cn(
-        'flex shrink-0 flex-col border-r border-line bg-surface',
+        'flex shrink-0 flex-col border-r border-line-strong bg-sidebar',
         'transition-[width] duration-[var(--motion-duration)]',
-        collapsed ? 'w-12' : 'w-56',
+        collapsed ? 'w-12' : 'w-[11rem]',
       )}
     >
       {/* Brand Header */}
       <div
         className={cn(
-          'flex h-11 items-center border-b border-line',
+          'flex h-11 items-center border-b border-line-strong',
           collapsed ? 'justify-center' : 'gap-2.5 px-3',
         )}
       >
@@ -69,11 +69,11 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
                     aria-label={collapsed ? item.label : undefined}
                     className={({ isActive }) =>
                       cn(
-                        'group relative flex items-center rounded-sm text-[0.8125rem] outline-offset-[-2px]',
+                        'group relative flex items-center rounded-sm outline-offset-[-2px]',
                         'transition-colors duration-[var(--motion-duration)]',
                         collapsed ? 'h-8 w-8 justify-center' : 'h-7 gap-2.5 px-2 text-xs',
                         isActive
-                          ? 'bg-inset text-fg font-medium border border-line-strong'
+                          ? 'bg-accent-soft text-fg font-semibold border border-accent/25'
                           : 'text-dim hover:bg-elevated hover:text-fg',
                       )
                     }
@@ -89,7 +89,12 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
                             )}
                           />
                         )}
-                        <Icon className="h-3.5 w-3.5 shrink-0" />
+                        <Icon
+                          className={cn(
+                            'h-3.5 w-3.5 shrink-0',
+                            isActive ? 'text-accent' : 'text-dim group-hover:text-fg',
+                          )}
+                        />
                         {!collapsed && <span className="truncate">{item.label}</span>}
                         {!collapsed && item.pendingBackend && (
                           <span
@@ -121,7 +126,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
 
       {/* User Account / Workspace Footer */}
       {!collapsed && user && (
-        <div className="p-2 border-t border-line">
+        <div className="p-2 border-t border-line-strong">
           <UserIdentityBadge variant="full" />
         </div>
       )}
@@ -129,7 +134,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
       {/* Collapse Toggle */}
       <div
         className={cn(
-          'flex h-9 items-center border-t border-line',
+          'flex h-9 items-center border-t border-line-strong',
           collapsed ? 'justify-center' : 'justify-end px-2',
         )}
       >

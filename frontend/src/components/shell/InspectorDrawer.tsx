@@ -64,12 +64,12 @@ export function InspectorDrawer({
         aria-modal="true"
         aria-label="Inspector"
         className={cn(
-          'fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-line bg-surface shadow-2xl motion-drawer',
+          'fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-line-strong bg-surface shadow-2xl motion-drawer',
           widthClasses[width],
           className,
         )}
       >
-        <div className="flex h-14 items-center justify-between border-b border-line px-5">
+        <div className="flex h-14 items-center justify-between border-b border-line-strong px-5">
           <div className="flex min-w-0 items-center gap-2.5">
             {icon && <span className="text-accent shrink-0">{icon}</span>}
             <div className="flex min-w-0 flex-col gap-0.5">

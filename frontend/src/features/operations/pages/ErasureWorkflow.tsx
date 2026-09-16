@@ -1,5 +1,5 @@
 ﻿import { useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import {
   Flame,
   ShieldAlert,
@@ -67,7 +67,16 @@ export function ErasureWorkflow() {
 
   // Workflow state
   const [currentStep] = useState<number>(4) // Start at Configure step
-  const [selectedMode, setSelectedMode] = useState<OperationMode>('COMPLETE_ERASURE')
+  // Objective Selection may preselect a mode; anything unrecognised falls back to the default.
+  const location = useLocation()
+  const requestedMode = (location.state as { mode?: unknown } | null)?.mode
+  const [selectedMode, setSelectedMode] = useState<OperationMode>(
+    requestedMode === 'CONTROLLED_RECOVERABLE' ||
+      requestedMode === 'SELECTIVE_PERMANENT' ||
+      requestedMode === 'COMPLETE_ERASURE'
+      ? requestedMode
+      : 'COMPLETE_ERASURE',
+  )
   const [retentionDays, setRetentionDays] = useState<number>(30)
 
   // The policy is determined by the mode, because that is how the backend allowlist is built: each

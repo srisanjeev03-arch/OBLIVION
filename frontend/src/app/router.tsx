@@ -1,6 +1,7 @@
 import { createBrowserRouter } from 'react-router'
 import { AppShell } from '@/components/shell/AppShell'
 import { Overview } from '@/features/dashboard/pages/Overview'
+import { ObjectiveSelection } from '@/features/objective/pages/ObjectiveSelection'
 import { Targets } from '@/features/discovery/pages/Targets'
 import { Operations } from '@/features/operations/pages/Operations'
 import { OperationDetail } from '@/features/operations/pages/OperationDetail'
@@ -41,6 +42,15 @@ export const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <Overview /> },
+      {
+        // Guided entry point: it only navigates, and every destination carries its own guard.
+        path: 'objective',
+        element: (
+          <RequireNavPermission navId="objective">
+            <ObjectiveSelection />
+          </RequireNavPermission>
+        ),
+      },
       {
         path: 'targets',
         element: (

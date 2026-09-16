@@ -17,7 +17,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const singleDef = SINGLE_ACCENTS[singleAccent] ?? SINGLE_ACCENTS.violet
 
   return (
-    <header className="flex h-11 shrink-0 items-center justify-between gap-4 border-b border-line bg-surface/80 px-4 backdrop-blur-xs">
+    <header className="flex h-11 shrink-0 items-center justify-between gap-4 border-b border-line-strong bg-surface/90 px-4 backdrop-blur-sm">
       <nav aria-label="Breadcrumb" className="min-w-0">
         <ol className="flex items-center gap-2 text-xs text-mute">
           <li className="font-semibold text-fg">Oblivion</li>

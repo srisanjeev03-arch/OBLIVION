@@ -11,12 +11,14 @@ import {
   Settings,
   ShieldCheck,
   Users,
+  Compass,
 } from 'lucide-react'
 import type { User, PermissionKey, Role } from '@/lib/auth/types'
 import { hasPermission } from '@/lib/auth/permissions'
 
 export type NavId =
   | 'overview'
+  | 'objective'
   | 'targets'
   | 'operations'
   | 'erasure'
@@ -62,6 +64,13 @@ export const ALL_NAV_SECTIONS: readonly NavSection[] = [
         path: '/',
         icon: LayoutGrid,
         purpose: 'What requires attention right now.',
+      },
+      {
+        id: 'objective',
+        label: 'Objective',
+        path: '/objective',
+        icon: Compass,
+        purpose: 'Define the forensic goal before selecting targets and configuring policies.',
       },
       {
         id: 'targets',

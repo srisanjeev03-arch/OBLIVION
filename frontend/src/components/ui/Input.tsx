@@ -46,9 +46,9 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           aria-invalid={error ? true : undefined}
           aria-describedby={[hintId, errorId].filter(Boolean).join(' ') || undefined}
           className={cn(
-            'w-full rounded-md border bg-surface text-fg placeholder:text-mute',
+            'w-full rounded-md border bg-elevated text-fg placeholder:text-mute',
             'transition-colors duration-[var(--motion-duration)]',
-            'hover:border-line-strong focus:border-accent focus:outline-none',
+            'hover:border-line-active focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25',
             'disabled:cursor-not-allowed disabled:opacity-45',
             size === 'sm' ? 'h-7 px-2.5 text-xs' : 'h-8 px-3 text-[0.8125rem]',
             leadingIcon && (size === 'sm' ? 'pl-7' : 'pl-8'),

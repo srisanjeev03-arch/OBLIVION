@@ -33,19 +33,19 @@ function Frame({
     <div
       role={role}
       className={cn(
-        'flex flex-col items-center justify-center gap-2 text-center',
+        'flex flex-col items-center justify-center gap-2.5 text-center',
         compact ? 'px-4 py-6' : 'px-6 py-12',
         className,
       )}
     >
-      <div className="flex h-9 w-9 items-center justify-center rounded-md border border-line bg-inset text-mute">
+      <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-line bg-elevated text-mute">
         {icon}
       </div>
       <div className="flex flex-col items-center gap-1">
         {badge}
         {title && <p className="text-sm font-medium text-fg">{title}</p>}
         {description && (
-          <div className="max-w-md text-xs leading-relaxed text-mute">{description}</div>
+          <div className="max-w-md text-xs leading-relaxed text-dim">{description}</div>
         )}
       </div>
       {action && <div className="mt-1">{action}</div>}

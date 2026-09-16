@@ -15,9 +15,9 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantClasses: Record<ButtonVariant, string> = {
-  primary: 'bg-accent text-accent-fg hover:brightness-110 active:brightness-95',
-  default: 'border border-line-strong bg-elevated text-fg hover:bg-inset active:bg-inset',
-  outline: 'border border-line-strong text-fg hover:bg-elevated active:bg-inset',
+  primary: 'bg-accent text-accent-fg hover:brightness-110 active:brightness-95 shadow-sm',
+  default: 'border border-line-strong bg-elevated text-fg hover:bg-inset hover:border-line-active active:bg-inset',
+  outline: 'border border-line-strong text-fg hover:bg-elevated hover:border-line-active active:bg-inset',
   ghost: 'text-dim hover:bg-elevated hover:text-fg active:bg-inset',
   danger: 'border border-danger/40 bg-danger-soft text-danger hover:bg-danger hover:text-white',
 }

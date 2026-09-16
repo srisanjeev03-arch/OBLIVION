@@ -88,7 +88,7 @@ export function DataTable<T>({
       <table className="w-full border-collapse text-left text-[0.8125rem]">
         <caption className="sr-only">{caption}</caption>
         <thead>
-          <tr className="border-b border-line bg-inset/60">
+          <tr className="border-b border-line-strong bg-elevated/70">
             {columns.map((col) => {
               const sortable = !!col.sortValue
               const active = sort?.key === col.key
@@ -106,7 +106,7 @@ export function DataTable<T>({
                   style={{ width: col.width }}
                   aria-sort={ariaSort}
                   className={cn(
-                    'whitespace-nowrap text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-mute',
+                    'whitespace-nowrap text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-dim',
                     cellPad,
                     col.align === 'right' && 'text-right',
                   )}
@@ -160,7 +160,7 @@ export function DataTable<T>({
                   onKeyDown={(e) => handleRowKey(e, row)}
                   className={cn(
                     'transition-colors duration-[var(--motion-duration)]',
-                    interactive && 'cursor-pointer hover:bg-elevated focus-visible:bg-elevated',
+                    interactive && 'cursor-pointer hover:bg-elevated/60 focus-visible:bg-elevated/60',
                     selected && 'bg-accent-soft',
                   )}
                 >

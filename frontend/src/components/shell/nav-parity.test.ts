@@ -64,9 +64,9 @@ describe('navigation / route parity', () => {
   })
 
   it('gates every non-public destination behind a permission', () => {
-    // Overview and Settings are UI surface; everything else is data-bearing and must be gated.
+    // Overview, Objective, and Settings are UI surface; everything else is data-bearing and must be gated.
     const ungated = NAV_ITEMS.filter(
-      (item) => !item.permission && !['overview', 'settings'].includes(item.id),
+      (item) => !item.permission && !['overview', 'objective', 'settings'].includes(item.id),
     ).map((item) => item.id)
     expect(ungated).toEqual([])
   })

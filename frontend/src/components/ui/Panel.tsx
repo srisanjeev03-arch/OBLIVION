@@ -11,7 +11,11 @@ export interface PanelProps extends HTMLAttributes<HTMLElement> {
 export function Panel({ inset, as: Tag = 'div', className, children, ...props }: PanelProps) {
   return (
     <Tag
-      className={cn('rounded-md border border-line bg-surface', inset && 'bg-inset', className)}
+      className={cn(
+        'rounded-md border bg-surface',
+        inset ? 'border-line bg-inset' : 'border-line',
+        className,
+      )}
       {...props}
     >
       {children}
@@ -46,7 +50,7 @@ export function PanelHeader({
         <Heading className="truncate text-xs font-semibold uppercase tracking-[0.08em] text-dim">
           {title}
         </Heading>
-        {description && <p className="mt-0.5 text-xs text-mute">{description}</p>}
+        {description && <p className="mt-0.5 text-[0.6875rem] text-mute leading-relaxed">{description}</p>}
       </div>
       {aside && <div className="flex shrink-0 items-center gap-2">{aside}</div>}
     </div>

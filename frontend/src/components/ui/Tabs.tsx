@@ -47,7 +47,7 @@ export function Tabs<T extends string = string>({
               'disabled:pointer-events-none disabled:opacity-40',
               size === 'sm' ? 'h-6 px-2 text-xs' : 'h-7 px-2.5 text-xs',
               isSelected
-                ? 'bg-elevated text-fg shadow-xs border border-line-strong'
+                ? 'bg-elevated text-fg border border-line-strong'
                 : 'text-dim hover:bg-inset hover:text-fg border border-transparent',
             )}
           >

@@ -4,7 +4,9 @@
 
 /*
   Oblivion Forensic Security Console Token System.
-  - Surfaces: pure-black ramp bg (#000000) → surface (#060608) → elevated (#0d0d11) → inset (#121217), hairline borders.
+  - Surfaces: layered dark ramp bg (#050506) → sidebar (#08090C) → surface (#0B0C0F) → inset (#0F1014) → elevated (#14161C).
+    Each step is perceptually distinct so PAGE → SECTION → CARD → NESTED CARD is immediately visible.
+  - Borders: three levels — subtle (#22242D, card edges), structural (#2E313C, containers), active (#3A3E48, selected/focused).
   - Accent Tokens: Primary, Secondary, Supporting, Hover, Active, and Data Visualization series.
   - Semantic colors are fixed and immutable; status is always expressed with text + icon + tone.
   - Density, corner radius, and motion are driven by data attributes on <html>.
@@ -15,11 +17,13 @@
   --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
 
   --color-bg: var(--bg);
+  --color-sidebar: var(--sidebar);
   --color-surface: var(--surface);
   --color-elevated: var(--elevated);
   --color-inset: var(--inset);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
+  --color-line-active: var(--line-active);
   --color-fg: var(--fg);
   --color-dim: var(--dim);
   --color-mute: var(--mute);
@@ -98,30 +102,37 @@
 
   --motion-duration: 120ms;
   --motion-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Content width — forensic console desktop constraint */
+  --content-max: 1400px;
 }
 
 .dark,
 :root {
-  --bg: #000000;
-  --surface: #060608;
-  --elevated: #0d0d11;
-  --inset: #121217;
-  --line: rgba(255, 255, 255, 0.07);
-  --line-strong: rgba(255, 255, 255, 0.14);
-  --fg: #f0f0f3;
-  --dim: #92929e;
-  --mute: #585864;
+  --bg: #050506;
+  --sidebar: #08090C;
+  --surface: #0B0C0F;
+  --inset: #0F1014;
+  --elevated: #14161C;
+  --line: #22242D;
+  --line-strong: #2E313C;
+  --line-active: #3A3E48;
+  --fg: #E8E9ED;
+  --dim: #8C8E9C;
+  --mute: #5A5C6E;
   --accent-fg: #000000;
 }
 
 .light {
   color-scheme: light;
   --bg: #f3f3f5;
+  --sidebar: #ffffff;
   --surface: #ffffff;
   --elevated: #ffffff;
   --inset: #e8e8ed;
   --line: rgba(9, 9, 15, 0.09);
   --line-strong: rgba(9, 9, 15, 0.18);
+  --line-active: rgba(9, 9, 15, 0.28);
   --fg: #121216;
   --dim: #4d4d58;
   --mute: #7c7c88;

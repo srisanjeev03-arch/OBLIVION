@@ -1,4 +1,5 @@
 ﻿import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { StrictMode } from 'react'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AuthProvider } from './provider'
@@ -339,6 +340,23 @@ describe('dev persona isolation', () => {
 
 
 describe('provider auth boundary', () => {
+  it('settles the mount-time restore under StrictMode instead of hanging', async () => {
+    // StrictMode mounts, unmounts and re-mounts. A once-only guard kept in a ref skipped the
+    // second restore while the first was discarded as cancelled, so the console never left
+    // AUTHENTICATING.
+    const restore = vi.fn(() => Promise.resolve(null))
+    render(
+      <StrictMode>
+        <AuthProvider sessionSource={{ ...backendContractSessionSource, restore }}>
+          <Harness />
+        </AuthProvider>
+      </StrictMode>,
+    )
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('UNAUTHENTICATED'))
+    expect(restore).toHaveBeenCalled()
+    expect(getBearerToken()).toBeNull()
+  })
+
   it('starts unauthenticated without calling any auth endpoint', async () => {
     const { calls } = stubBackend(loginHandler)
     await renderAuth(backendContractSessionSource)

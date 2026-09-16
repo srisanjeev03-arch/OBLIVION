@@ -57,9 +57,9 @@ export function Select<T extends string = string>({
           aria-describedby={hintId}
           onChange={(e) => onChange(e.target.value as T)}
           className={cn(
-            'w-full appearance-none rounded-md border border-line-strong bg-surface pr-8 text-fg',
+            'w-full appearance-none rounded-md border border-line-strong bg-elevated pr-8 text-fg',
             'transition-colors duration-[var(--motion-duration)]',
-            'focus:border-accent focus:outline-none',
+            'hover:border-line-active focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25',
             'disabled:cursor-not-allowed disabled:opacity-45',
             size === 'sm' ? 'h-7 pl-2.5 text-xs' : 'h-8 pl-3 text-[0.8125rem]',
             value === '' && 'text-mute',

@@ -193,7 +193,7 @@ export function CommandPalette({
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="rounded-sm border border-line bg-inset px-1.5 py-0.5 text-[0.625rem] text-mute uppercase">
+                      <span className="rounded-sm border border-line-strong bg-inset px-1.5 py-0.5 text-[0.625rem] text-dim uppercase">
                         {item.category}
                       </span>
                       {isSelected && <ArrowRight className="h-3 w-3 text-dim" aria-hidden="true" />}
