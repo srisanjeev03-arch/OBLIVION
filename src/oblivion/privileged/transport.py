@@ -55,6 +55,13 @@ _LENGTH_PREFIX: Final = struct.Struct(">I")
 # Win32 constants, named rather than inlined so the calls below read as intent.
 _PIPE_ACCESS_DUPLEX: Final = 0x00000003
 
+#: Makes CreateNamedPipeW fail if any instance of the name already exists.
+#: Startup-only protection: without it, a pipe squatted before the service
+#: starts is silently *joined* (the squatter's DACL and instance limit apply),
+#: which was reproduced on Windows. It does nothing for a gap between requests;
+#: the persistent instance in :class:`NamedPipeServer` is what closes that.
+_FILE_FLAG_FIRST_PIPE_INSTANCE: Final = 0x00080000
+
 #: Byte-stream mode, not message mode. In message mode a read smaller than the
 #: message fails with ERROR_MORE_DATA, which makes reading a length prefix and
 #: then a body impossible - and the length framing is what protects against a
@@ -71,6 +78,7 @@ _TOKEN_USER_CLASS: Final = 1
 _SDDL_REVISION_1: Final = 1
 _ERROR_FILE_NOT_FOUND: Final = 2
 _ERROR_PIPE_BUSY: Final = 231
+_ERROR_NO_DATA: Final = 232
 _ERROR_PIPE_CONNECTED: Final = 535
 
 #: The pointer-width invalid-handle sentinel. Comparing a HANDLE against a bare
@@ -94,6 +102,15 @@ _signatures_declared = False
 
 class TransportError(Exception):
     """Raised when a message could not be exchanged with the service."""
+
+
+class PipeInstanceError(TransportError):
+    """Raised when the server's persistent pipe instance can no longer be used.
+
+    Fatal to the server. It stops rather than closing and recreating the pipe,
+    because the moment between close and create is when another process can
+    take the name (finding PS-1).
+    """
 
 
 class ServiceUnavailableError(TransportError):
@@ -260,8 +277,7 @@ class InProcessTransport:
             request = PrivilegedRequest.from_wire(envelope.get("request"))
         except ProtocolError as exc:
             raise TransportError(f"Malformed privileged request: {exc}") from None
-        response = self._service.handle(request, str(envelope.get("mac", "")))
-        return response.to_wire()
+        return self._service.respond(request, str(envelope.get("mac", "")))
 
 
 def _encode(payload: dict[str, Any]) -> bytes:
@@ -435,6 +451,14 @@ class NamedPipeServer:
     operations against a shared target are not obviously safe to run
     concurrently, and serialising them removes a class of race entirely at a
     cost - throughput - that does not matter for this workload.
+
+    **One pipe instance for the life of the server.** The instance is created
+    once and reused through ``ConnectNamedPipe``/``DisconnectNamedPipe`` cycles.
+    The server never closes and recreates it between requests: while the
+    service holds the only instance, another process's ``CreateNamedPipeW`` on
+    the name fails with ``ERROR_PIPE_BUSY``, and a close/recreate gap is exactly
+    where a local process could take the name (finding PS-1). If the instance
+    becomes unusable the server stops instead of recreating it.
     """
 
     def __init__(
@@ -448,26 +472,49 @@ class NamedPipeServer:
         self._service = service
         self._pipe_name = pipe_name
         self._stop = False
+        self._handle: int | None = None
 
     @property
     def pipe_name(self) -> str:
         return self._pipe_name
 
+    @property
+    def handle(self) -> int | None:
+        """The persistent instance, or None when the server is not open."""
+        return self._handle
+
     def stop(self) -> None:
+        """Ask the loop to exit. Checked between connections, not mid-request."""
         self._stop = True
+
+    def open(self, timeout_ms: int = 5000) -> int:
+        """Create the server's single, persistent pipe instance."""
+        if self._handle is not None:
+            raise TransportError("The pipe server is already open")
+        self._handle = self.create_pipe(timeout_ms)
+        return self._handle
+
+    def close(self) -> None:
+        """Release the instance. Only for shutdown - it is never recreated."""
+        handle, self._handle = self._handle, None
+        if handle is not None:
+            ctypes.windll.kernel32.CloseHandle(handle)
 
     def create_pipe(self, timeout_ms: int = 5000) -> int:
         """Create the pipe instance and return its handle.
 
         Separate from accepting so a caller - notably a test - can know the pipe
         exists before a client tries to connect, instead of racing startup.
+
+        Fails if any instance of the name already exists, so a name squatted
+        before startup is reported rather than joined.
         """
         kernel32 = ctypes.windll.kernel32
         attributes = _build_security_attributes()
 
         handle = kernel32.CreateNamedPipeW(
             self._pipe_name,
-            _PIPE_ACCESS_DUPLEX,
+            _PIPE_ACCESS_DUPLEX | _FILE_FLAG_FIRST_PIPE_INSTANCE,
             _PIPE_TYPE_BYTE
             | _PIPE_READMODE_BYTE
             | _PIPE_WAIT
@@ -485,13 +532,25 @@ class NamedPipeServer:
         return int(handle)
 
     def accept_once(self, handle: int) -> bool:
-        """Answer exactly one request on an already-created pipe handle."""
-        kernel32 = ctypes.windll.kernel32
-        try:
-            connected = kernel32.ConnectNamedPipe(handle, None)
-            if not connected and kernel32.GetLastError() != _ERROR_PIPE_CONNECTED:
-                return False
+        """Answer exactly one request, leaving the instance open for the next.
 
+        Returns False when the client went away before being served. Raises
+        :class:`PipeInstanceError` when the instance itself is unusable, and a
+        plain :class:`TransportError` when only this exchange failed.
+        """
+        kernel32 = ctypes.windll.kernel32
+        connected = kernel32.ConnectNamedPipe(handle, None)
+        if not connected:
+            error = kernel32.GetLastError()
+            if error == _ERROR_NO_DATA:
+                # The client left before being served. The instance still has to
+                # be disconnected before it can accept anyone else.
+                self._disconnect(handle)
+                return False
+            if error != _ERROR_PIPE_CONNECTED:
+                raise PipeInstanceError(f"ConnectNamedPipe failed with error {error}")
+
+        try:
             try:
                 payload = self._read_message(handle)
                 reply = InProcessTransport(self._service).exchange(payload)
@@ -512,23 +571,40 @@ class NamedPipeServer:
             return True
         finally:
             kernel32.FlushFileBuffers(handle)
-            kernel32.DisconnectNamedPipe(handle)
+            self._disconnect(handle)
 
-    def serve_once(self, timeout_ms: int = 5000) -> bool:
-        """Create a pipe, accept one connection, answer one request."""
+    @staticmethod
+    def _disconnect(handle: int) -> None:
         kernel32 = ctypes.windll.kernel32
-        handle = self.create_pipe(timeout_ms)
-        try:
-            return self.accept_once(handle)
-        finally:
-            kernel32.CloseHandle(handle)
+        if not kernel32.DisconnectNamedPipe(handle):
+            raise PipeInstanceError(
+                f"DisconnectNamedPipe failed with error {kernel32.GetLastError()}"
+            )
 
-    def serve_forever(self) -> None:  # pragma: no cover - long-running loop
-        while not self._stop:
-            try:
-                self.serve_once()
-            except TransportError:
-                logger.exception("privileged.pipe.exchange_failed")
+    def serve_forever(
+        self, *, timeout_ms: int = 5000, max_connections: int | None = None
+    ) -> None:
+        """Serve on one persistent instance until stopped.
+
+        ``max_connections`` bounds the loop for tests and supervised runs. The
+        instance is closed only when the loop ends; it is never recreated.
+        """
+        handle = self._handle if self._handle is not None else self.open(timeout_ms)
+        handled = 0
+        try:
+            while not self._stop and (
+                max_connections is None or handled < max_connections
+            ):
+                handled += 1
+                try:
+                    self.accept_once(handle)
+                except PipeInstanceError:
+                    logger.exception("privileged.pipe.instance_unusable")
+                    raise
+                except TransportError:
+                    logger.exception("privileged.pipe.exchange_failed")
+        finally:
+            self.close()
 
     def _read_message(self, handle: int) -> dict[str, Any]:
         return _read_framed(handle)

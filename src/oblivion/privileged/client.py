@@ -27,9 +27,8 @@ from oblivion.privileged.protocol import (
     PrivilegedOperation,
     PrivilegedRequest,
     PrivilegedResponse,
-    ProtocolError,
 )
-from oblivion.privileged.service import RequestAuthenticator
+from oblivion.privileged.service import RequestAuthenticator, ResponseAuthenticationError
 from oblivion.privileged.transport import (
     ServiceUnavailableError,
     Transport,
@@ -84,7 +83,7 @@ class PrivilegedClient:
         return self._transport.isolated
 
     def send(self, request: PrivilegedRequest) -> PrivilegedResponse:
-        """Sign and exchange an already-built request."""
+        """Sign, exchange, and return only an authenticated, bound response."""
         envelope = {
             "request": request.to_wire(),
             "mac": self._authenticator.sign(request),
@@ -99,11 +98,14 @@ class PrivilegedClient:
         except TransportError as exc:
             raise PrivilegedClientError(str(exc)) from None
 
+        # Nothing from the pipe is believed until it is proven to be the service's
+        # answer to *this* request. Whoever holds the endpoint otherwise decides
+        # what the pipeline records as having happened (finding PS-1).
         try:
-            return PrivilegedResponse.from_wire(payload)
-        except ProtocolError as exc:
+            return self._authenticator.verify_response(request, payload)
+        except ResponseAuthenticationError as exc:
             raise PrivilegedClientError(
-                f"Privileged service returned a malformed response: {exc}"
+                f"Privileged service response rejected: {exc}"
             ) from None
 
     def request(

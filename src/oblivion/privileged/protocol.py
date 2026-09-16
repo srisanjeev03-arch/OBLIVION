@@ -21,6 +21,7 @@ side may believe is being enforced.
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -255,6 +256,10 @@ class PrivilegedRequest:
         disagree.
         """
         return canonicalize(self.to_wire())
+
+    def digest(self) -> str:
+        """Lowercase hex SHA-256 of :meth:`to_bytes`; binds a response to this request."""
+        return hashlib.sha256(self.to_bytes()).hexdigest()
 
     @classmethod
     def from_wire(cls, payload: Any) -> PrivilegedRequest:

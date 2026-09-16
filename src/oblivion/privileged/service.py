@@ -17,6 +17,12 @@ holding the service key and was not altered in transit**. It does not prove
 which human is behind it: a privileged service cannot authenticate an end user,
 and pretending otherwise would be the most dangerous kind of false assurance.
 
+Responses are authenticated too, with a key derived from the same secret, over
+the response bytes *and* the digest of the request they answer. Whoever holds
+the pipe endpoint therefore cannot tell the API that an operation completed,
+failed or was refused unless it holds the service key - and a genuine answer to
+one request cannot be presented as the answer to another (finding PS-1).
+
 The human is authenticated by the API, whose session-derived actor identity is
 carried in ``actor_id`` and recorded for audit. If the API process is
 compromised, the attacker inherits its authority - which is precisely why this
@@ -47,11 +53,13 @@ from oblivion.core.discovery.analyzer import TargetAnalyzer
 from oblivion.core.erasure.engine import ErasureEngine, ErasureMode
 from oblivion.core.erasure.events import EngineEventEmitter
 from oblivion.core.erasure.vault import RecoveryVault
+from oblivion.core.evidence.canonicalize import CanonicalizationError, canonicalize
 from oblivion.core.safety.paths import SafePathValidator
 from oblivion.privileged.protocol import (
     PrivilegedOperation,
     PrivilegedRequest,
     PrivilegedResponse,
+    ProtocolError,
     ResponseStatus,
 )
 from oblivion.privileged.validation import (
@@ -68,6 +76,18 @@ ENV_VAULT_ROOT: Final = "OBLIVION_VAULT_ROOT"
 
 #: Default wall-clock budget for a single privileged operation.
 DEFAULT_OPERATION_TIMEOUT_SECONDS: Final = 300.0
+
+#: Label for deriving the response-MAC key from the IPC secret. Requests are
+#: MACed with the secret itself over canonical JSON (which always begins with
+#: ``{``), so no request MAC can ever equal this derivation, and a key the API
+#: uses to *sign* can never be used to forge what the service *answers*.
+RESPONSE_KEY_LABEL: Final = b"OBLIVION-PRIV-1/derive/response-mac-key/v1"
+
+#: Domain tag inside every response-MAC input.
+RESPONSE_MAC_DOMAIN: Final = "OBLIVION-PRIV-1/response-mac/v1"
+
+#: Wire field carrying the response MAC. Excluded from the MAC input.
+RESPONSE_MAC_FIELD: Final = "mac"
 
 
 class ServiceState(str, Enum):
@@ -112,6 +132,10 @@ class PrivilegedServiceError(Exception):
 
 class AuthenticationError(Exception):
     """Raised when a request's integrity or authenticity cannot be established."""
+
+
+class ResponseAuthenticationError(AuthenticationError):
+    """Raised when a response is not an authentic answer to the request sent."""
 
 
 class ReplayCacheFull(Exception):
@@ -198,11 +222,21 @@ class ReplayCache:
 
 
 class RequestAuthenticator:
-    """Computes and verifies the MAC over a request's canonical bytes.
+    """Authenticates both directions of the privileged exchange.
 
-    The MAC covers :meth:`PrivilegedRequest.to_bytes`, which is the canonical
-    encoding - so integrity is defined over exactly the bytes the service will
-    act on, and a field cannot be altered between verification and use.
+    Requests: HMAC-SHA256 under the IPC secret over
+    :meth:`PrivilegedRequest.to_bytes`, the canonical encoding - so integrity is
+    defined over exactly the bytes the service will act on.
+
+    Responses: HMAC-SHA256 under ``HMAC-SHA256(secret, RESPONSE_KEY_LABEL)``
+    over the canonical encoding of::
+
+        {"domain": RESPONSE_MAC_DOMAIN,
+         "request_digest": <SHA-256 of the request's canonical bytes>,
+         "response": <response wire, including nonce and request_digest>}
+
+    The verifier supplies ``request_digest`` from the request *it* sent, so a
+    response is only accepted as the answer to that exact request.
     """
 
     def __init__(self, key: bytes) -> None:
@@ -211,6 +245,7 @@ class RequestAuthenticator:
                 "Refusing to construct an authenticator with an empty key"
             )
         self._key = key
+        self._response_key = hmac.new(key, RESPONSE_KEY_LABEL, sha256).digest()
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> RequestAuthenticator | None:
@@ -252,6 +287,99 @@ class RequestAuthenticator:
                 "Request MAC does not verify. The request was not produced by a "
                 "holder of the service key, or it was altered in transit."
             )
+
+    # -- responses -------------------------------------------------------
+
+    def _response_mac(self, request_digest: str, body: dict[str, Any]) -> str:
+        message = canonicalize(
+            {
+                "domain": RESPONSE_MAC_DOMAIN,
+                "request_digest": request_digest,
+                "response": body,
+            }
+        )
+        return hmac.new(self._response_key, message, sha256).hexdigest()
+
+    def seal_response(
+        self, request: PrivilegedRequest, response: PrivilegedResponse
+    ) -> dict[str, Any]:
+        """Render ``response`` to the wire, bound to ``request`` and MACed.
+
+        Raises :class:`CanonicalizationError` when the result has no canonical
+        form; the caller decides what to send instead.
+        """
+        body = response.to_wire()
+        body["nonce"] = request.nonce
+        body["request_digest"] = request.digest()
+        sealed = dict(body)
+        sealed[RESPONSE_MAC_FIELD] = self._response_mac(body["request_digest"], body)
+        return sealed
+
+    def verify_response(
+        self, request: PrivilegedRequest, payload: Any
+    ) -> PrivilegedResponse:
+        """Accept ``payload`` only as an authentic answer to ``request``.
+
+        Raises :class:`ResponseAuthenticationError` on any doubt. Nothing from
+        the payload is returned unless every check below has passed.
+        """
+        if not isinstance(payload, dict):
+            raise ResponseAuthenticationError("Privileged response is not a JSON object")
+
+        mac = payload.get(RESPONSE_MAC_FIELD)
+        if not isinstance(mac, str) or not mac:
+            raise ResponseAuthenticationError(
+                "Privileged response carries no MAC; an unauthenticated response is "
+                "never accepted, whatever it claims"
+            )
+        body = {k: v for k, v in payload.items() if k != RESPONSE_MAC_FIELD}
+        expected_digest = request.digest()
+
+        if body.get("nonce") != request.nonce:
+            raise ResponseAuthenticationError(
+                "Privileged response nonce does not match the request nonce"
+            )
+        if body.get("request_digest") != expected_digest:
+            raise ResponseAuthenticationError(
+                "Privileged response is not bound to this request (request digest "
+                "mismatch)"
+            )
+        if body.get("request_id") != request.request_id or body.get(
+            "operation_id"
+        ) != request.operation_id:
+            raise ResponseAuthenticationError(
+                "Privileged response request identity does not match the request"
+            )
+
+        try:
+            response = PrivilegedResponse.from_wire(body)
+            reconstructed = response.to_wire()
+            reconstructed["nonce"] = body["nonce"]
+            reconstructed["request_digest"] = body["request_digest"]
+            canonical_ok = canonicalize(reconstructed) == canonicalize(body)
+        except (ProtocolError, CanonicalizationError) as exc:
+            raise ResponseAuthenticationError(
+                f"Privileged response is malformed: {exc}"
+            ) from None
+        if not canonical_ok:
+            raise ResponseAuthenticationError(
+                "Privileged response cannot be canonically reconstructed; it carries "
+                "fields or values outside the response contract"
+            )
+        if response.operation is not request.operation:
+            raise ResponseAuthenticationError(
+                "Privileged response operation does not match the request"
+            )
+
+        expected_mac = self._response_mac(expected_digest, body)
+        if not hmac.compare_digest(
+            expected_mac.encode("ascii"), mac.encode("utf-8", "surrogatepass")
+        ):
+            raise ResponseAuthenticationError(
+                "Privileged response MAC does not verify. It was not produced by a "
+                "holder of the service key, or it was altered in transit."
+            )
+        return response
 
 
 @dataclass
@@ -515,6 +643,53 @@ class PrivilegedService:
             status=ResponseStatus.COMPLETED,
             result=result,
         )
+
+    def respond(
+        self,
+        request: PrivilegedRequest,
+        mac: str,
+        *,
+        now: _dt.datetime | None = None,
+    ) -> dict[str, Any]:
+        """Handle ``request`` and return the wire reply, sealed when possible.
+
+        A reply is sealed only for a request whose MAC verified. A service with
+        no key, or a request not produced by a key holder, gets an unsealed
+        refusal: the client rejects it, which is the fail-closed outcome, and
+        the service never MACs an answer to input it could not authenticate.
+        """
+        response = self.handle(request, mac, now=now)
+        authenticator = self._config.authenticator
+        if authenticator is None:
+            return response.to_wire()
+        try:
+            authenticator.verify(request, mac)
+        except AuthenticationError:
+            return response.to_wire()
+
+        try:
+            return authenticator.seal_response(request, response)
+        except CanonicalizationError:
+            # The work may already be done, so this is FAILED-and-reconcile, not
+            # a refusal - and never an unauthenticated copy of the real result.
+            logger.error(
+                "privileged.response.unencodable operation=%s", request.operation.value
+            )
+            return authenticator.seal_response(
+                request,
+                PrivilegedResponse(
+                    request_id=request.request_id,
+                    operation=request.operation,
+                    operation_id=request.operation_id,
+                    status=ResponseStatus.FAILED,
+                    result={"reconciliation_required": True},
+                    message=(
+                        "The operation result has no canonical encoding, so it "
+                        "could not be authenticated. It may have completed; the "
+                        "persisted operation state must be reconciled."
+                    ),
+                ),
+            )
 
     def _refuse(
         self, request: PrivilegedRequest, refusals: tuple[str, ...]
