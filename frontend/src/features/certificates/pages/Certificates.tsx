@@ -1,4 +1,5 @@
-﻿import { useState, type FormEvent } from 'react'
+﻿import { useState, useEffect, type FormEvent } from 'react'
+import { useParams, useNavigate } from 'react-router'
 import { FileCheck2, Search } from 'lucide-react'
 import { PageHeader } from '@/components/shell/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -32,9 +33,20 @@ import { unavailableReason } from '@/lib/api/capabilities'
  * an operation's evidence trail â€” rather than browsing a list. That limitation is stated on screen.
  */
 export function Certificates() {
-  const [enteredId, setEnteredId] = useState('')
-  const [lookupId, setLookupId] = useState<string | null>(null)
+  const { certificateId: routeId } = useParams<{ certificateId?: string }>()
+  const navigate = useNavigate()
+  // A deep link (/certificates/<id>) seeds the lookup; the form path keeps the id in the URL so a
+  // refresh or a shared link lands on the same certificate instead of an empty form.
+  const [enteredId, setEnteredId] = useState(routeId ?? '')
+  const [lookupId, setLookupId] = useState<string | null>(routeId ?? null)
   const [verification, setVerification] = useState<CertificateVerificationOut | null>(null)
+
+  useEffect(() => {
+    if (!routeId) return
+    setEnteredId(routeId)
+    setLookupId(routeId)
+    setVerification(null)
+  }, [routeId])
 
   const certificateQuery = useCertificateQuery(lookupId ?? undefined)
   const verifyMutation = useVerifyCertificateMutation(lookupId ?? '')
@@ -46,6 +58,7 @@ export function Certificates() {
     if (!trimmed) return
     setVerification(null)
     setLookupId(trimmed)
+    void navigate(`/certificates/${encodeURIComponent(trimmed)}`, { replace: true })
   }
 
   // The expectations are built from the operation and target records, fetched

@@ -2,6 +2,7 @@
 import { Navigate, useLocation } from 'react-router'
 import { useAuth } from '@/lib/auth/context'
 import { Unauthorized } from '@/features/authentication/pages/Unauthorized'
+import { NAV_ITEMS, type NavId } from '@/components/shell/nav'
 import type { PermissionKey } from '@/lib/auth/types'
 
 /**
@@ -59,3 +60,32 @@ export function RequirePermission({
 
   return <>{children}</>
 }
+
+/**
+ * Route guard keyed by navigation id rather than by a repeated permission literal.
+ *
+ * Declaring a permission twice - once in `nav.ts` for sidebar visibility and again in the router for
+ * the guard - is how the two drift apart, and the failure is silent in the worst direction: the
+ * sidebar shows a link the router then refuses, or the router admits a screen the sidebar implies
+ * is privileged. Looking the permission up here leaves exactly one declaration.
+ *
+ * A nav item with no `permission` is a deliberately ungated route (Overview, Settings). An unknown
+ * navId throws, because a typo would otherwise render a protected page with no guard at all.
+ */
+export function RequireNavPermission({
+  navId,
+  children,
+}: {
+  navId: NavId
+  children: ReactNode
+}) {
+  const item = NAV_ITEMS.find((n) => n.id === navId)
+  if (!item) {
+    throw new Error(
+      `RequireNavPermission: "${navId}" is not a navigation id. Refusing to render an ungated route.`,
+    )
+  }
+  if (!item.permission) return <>{children}</>
+  return <RequirePermission permission={item.permission}>{children}</RequirePermission>
+}
+

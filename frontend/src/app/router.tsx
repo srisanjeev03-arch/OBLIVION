@@ -1,4 +1,4 @@
-﻿import { createBrowserRouter } from 'react-router'
+import { createBrowserRouter } from 'react-router'
 import { AppShell } from '@/components/shell/AppShell'
 import { Overview } from '@/features/dashboard/pages/Overview'
 import { Targets } from '@/features/discovery/pages/Targets'
@@ -15,9 +15,19 @@ import { Administration } from '@/features/administration/pages/Administration'
 import { NotFound } from '@/app/NotFound'
 import { Login } from '@/features/authentication/pages/Login'
 import { Unauthorized } from '@/features/authentication/pages/Unauthorized'
-import { RequireAuth, RequirePermission } from '@/components/auth/RouteGuards'
+import {
+  RequireAuth,
+  RequireNavPermission,
+  RequirePermission,
+} from '@/components/auth/RouteGuards'
 import { RouteError } from './RouteError'
 
+/**
+ * Every route below resolves to a real page. Gating comes from `nav.ts` via `RequireNavPermission`
+ * wherever the route is also a navigation destination, so a sidebar entry and its guard can never
+ * disagree. `RequirePermission` is used only for the two detail routes that are not nav items, and
+ * `nav-parity.test.ts` pins them to their parent's permission.
+ */
 export const router = createBrowserRouter([
   { path: '/login', element: <Login /> },
   { path: '/unauthorized', element: <Unauthorized /> },
@@ -34,20 +44,21 @@ export const router = createBrowserRouter([
       {
         path: 'targets',
         element: (
-          <RequirePermission permission="case.view">
+          <RequireNavPermission navId="targets">
             <Targets />
-          </RequirePermission>
+          </RequireNavPermission>
         ),
       },
       {
         path: 'operations',
         element: (
-          <RequirePermission permission="operation.view">
+          <RequireNavPermission navId="operations">
             <Operations />
-          </RequirePermission>
+          </RequireNavPermission>
         ),
       },
       {
+        // Not a navigation destination, so it cannot inherit one. Must stay equal to `operations`.
         path: 'operations/:id',
         element: (
           <RequirePermission permission="operation.view">
@@ -58,45 +69,47 @@ export const router = createBrowserRouter([
       {
         path: 'erasure',
         element: (
-          <RequirePermission permission="file_erasure.request">
+          <RequireNavPermission navId="erasure">
             <ErasureWorkflow />
-          </RequirePermission>
+          </RequireNavPermission>
         ),
       },
       {
         path: 'recovery',
         element: (
-          <RequirePermission permission="recovery.view">
+          <RequireNavPermission navId="recovery">
             <RecoveryVault />
-          </RequirePermission>
+          </RequireNavPermission>
         ),
       },
       {
         path: 'residuals',
         element: (
-          <RequirePermission permission="evidence.view">
+          <RequireNavPermission navId="residuals">
             <ResidualAnalysis />
-          </RequirePermission>
+          </RequireNavPermission>
         ),
       },
       {
         path: 'assurance',
         element: (
-          <RequirePermission permission="operation.view">
+          <RequireNavPermission navId="assurance">
             <Assurance />
-          </RequirePermission>
+          </RequireNavPermission>
         ),
       },
       {
         path: 'certificates',
         element: (
-          <RequirePermission permission="operation.view">
+          <RequireNavPermission navId="certificates">
             <Certificates />
-          </RequirePermission>
+          </RequireNavPermission>
         ),
       },
       {
-        path: 'certificates/:id',
+        // Deep link to one certificate. Same guard as the certificates destination above; the page
+        // reads the id from the route instead of ignoring it.
+        path: 'certificates/:certificateId',
         element: (
           <RequirePermission permission="operation.view">
             <Certificates />
@@ -106,20 +119,22 @@ export const router = createBrowserRouter([
       {
         path: 'audit',
         element: (
-          <RequirePermission permission="audit.view">
+          <RequireNavPermission navId="audit">
             <Audit />
-          </RequirePermission>
+          </RequireNavPermission>
         ),
       },
       {
         path: 'administration',
         element: (
-          <RequirePermission permission="user.manage">
+          <RequireNavPermission navId="administration">
             <Administration />
-          </RequirePermission>
+          </RequireNavPermission>
         ),
       },
       {
+        // Console preferences: appearance and connection target. Holds no backend data, so it is
+        // reachable by any authenticated operator by design.
         path: 'settings',
         element: <Settings />,
       },
