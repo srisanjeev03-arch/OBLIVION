@@ -15,15 +15,22 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 
 from oblivion.certificate.keys import SigningKeyManager, generate_private_key_hex
 from oblivion.certificate.trust_model import StaticTrustStore, TrustedKey
-from oblivion.core.assurance.models import AnalysisState, AssuranceStatus
+from oblivion.core.assurance.models import (
+    AnalysisState,
+    AssuranceConfidence,
+    AssuranceResult,
+    AssuranceStatus,
+)
 from oblivion.core.pipeline import (
     ClosedLoopPipeline,
     PipelineRequest,
+    PipelineResult,
     Stage,
     StageStatus,
 )
@@ -554,3 +561,98 @@ def test_unavailable_capabilities_are_always_reported(temp_dir):
     assert "MFT" in joined
     assert "USN journal" in joined
     assert "shadow copy" in joined.lower()
+
+
+# ---------------------------------------------------------------------------
+# The final state reflects what assurance actually found
+# ---------------------------------------------------------------------------
+
+
+def test_a_recovered_target_ends_in_a_failed_final_state(
+    safe_validator, privileged_client, key_manager, trust_store, temp_dir
+):
+    """A recovery test that recovers the target must not be reported as success.
+
+    Regression for the bug where ``_final_state`` had no branch for
+    ``AssuranceStatus.FAILED`` and fell through to ``COMPLETED`` - so the
+    persisted operation state and the API's ``final_state`` read COMPLETED
+    while ``assurance_status`` read FAILED in the very same result object.
+    """
+    payload = "the same secret bytes"
+    target = temp_dir / "recoverable-original.txt"
+    target.write_text(payload)
+    survivor = temp_dir / "recoverable-backup.txt"
+    survivor.write_text(payload)
+
+    result = run_pipeline(
+        safe_validator,
+        privileged_client,
+        target,
+        key_manager=key_manager,
+        trust_store=trust_store,
+    )
+
+    assert not target.exists()  # the named file really was erased
+    assert result.assurance_status == AssuranceStatus.FAILED.name
+    assert result.final_state == State.FAILED.name
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        operation = OperationRepository(session).get_operation(result.operation_id)
+    assert operation.state == State.FAILED.name
+
+
+def test_final_state_maps_every_assurance_outcome(safe_validator, privileged_client):
+    """Pins the exact contract `_final_state` promises the state machine.
+
+    A missing execution or a missing certificate decide the outcome before
+    assurance is even consulted; only once both are present does assurance
+    choose between INCONCLUSIVE, FAILED and COMPLETED. FAILED is the branch
+    this regression exists for - INCONCLUSIVE and COMPLETED are pinned
+    alongside it so the fix cannot silently change either.
+    """
+
+    def assurance_with(status: AssuranceStatus) -> AssuranceResult:
+        return AssuranceResult(
+            operation_id="op_x",
+            target_id="C:\\x",
+            timestamp=datetime.now(UTC),
+            status=status,
+            confidence=AssuranceConfidence.HIGH,
+            summary="test",
+        )
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        pipeline = ClosedLoopPipeline(
+            session=session, validator=safe_validator, privileged=privileged_client
+        )
+        result = PipelineResult(operation_id="op_x", target_identity="C:\\x")
+
+        # No execution: nothing was destroyed, whatever assurance would say.
+        assert pipeline._final_state(result, None, None) == State.FAILED.name
+
+        # Execution happened, but no certificate was issued.
+        result.certificate_id = None
+        assert pipeline._final_state(result, {"ok": True}, None) == State.PARTIAL.name
+
+        # A certificate exists: assurance now decides.
+        result.certificate_id = "cert_x"
+        assert (
+            pipeline._final_state(
+                result, {"ok": True}, assurance_with(AssuranceStatus.INCONCLUSIVE)
+            )
+            == State.INCONCLUSIVE.name
+        )
+        assert (
+            pipeline._final_state(
+                result, {"ok": True}, assurance_with(AssuranceStatus.FAILED)
+            )
+            == State.FAILED.name
+        )
+        assert (
+            pipeline._final_state(
+                result, {"ok": True}, assurance_with(AssuranceStatus.PASSED)
+            )
+            == State.COMPLETED.name
+        )

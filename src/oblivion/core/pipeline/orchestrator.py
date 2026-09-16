@@ -1090,6 +1090,8 @@ class ClosedLoopPipeline:
             return State.PARTIAL.name
         if assurance is not None and assurance.status is AssuranceStatus.INCONCLUSIVE:
             return State.INCONCLUSIVE.name
+        if assurance is not None and assurance.status is AssuranceStatus.FAILED:
+            return State.FAILED.name
         return State.COMPLETED.name
 
     def _persist_state(self, request: PipelineRequest, result: PipelineResult) -> None:
