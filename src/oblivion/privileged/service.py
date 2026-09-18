@@ -73,6 +73,9 @@ logger = logging.getLogger(__name__)
 ENV_IPC_KEY: Final = "OBLIVION_IPC_KEY"
 ENV_VAULT_KEY: Final = "OBLIVION_VAULT_KEY"
 ENV_VAULT_ROOT: Final = "OBLIVION_VAULT_ROOT"
+#: The name the API historically read. Honoured as a fallback so the API and the
+#: privileged service always resolve one vault, never two.
+ENV_VAULT_DIR: Final = "OBLIVION_VAULT_DIR"
 
 #: Default wall-clock budget for a single privileged operation.
 DEFAULT_OPERATION_TIMEOUT_SECONDS: Final = 300.0
@@ -793,16 +796,30 @@ class PrivilegedService:
                 "capability": CapabilityState.UNAVAILABLE.value,
                 "detail": "No vault root or vault key is configured for this service.",
             }
+        object_id = request.params["object_id"]
+        vault = RecoveryVault(
+            self._config.vault_root, self._config.validator, self._config.vault_key
+        )
+        if not vault.exists(object_id):
+            # Reported before any decryption or write, so "no such object" is an
+            # answer rather than a decryption failure.
+            return {"status": "BLOCKED", "error": "RECOVERY_OBJECT_NOT_FOUND"}
         # The key comes from this process's own configuration. The request names
         # the object and the destination and nothing else; it cannot supply,
         # substitute or influence the key.
         return self._engine().restore_recovery_object(
-            request.params["object_id"],
+            object_id,
             str(outcome.destination_path),
             self._config.vault_key,
             authorized=True,
             allow_overwrite=False,
         )
+
+
+def resolve_vault_root(env: dict[str, str] | None = None) -> str | None:
+    """The configured vault root, shared by the API and the privileged service."""
+    source = env if env is not None else dict(os.environ)
+    return (source.get(ENV_VAULT_ROOT) or source.get(ENV_VAULT_DIR) or "").strip() or None
 
 
 def build_service_from_env(
@@ -840,7 +857,7 @@ def build_service_from_env(
         ServiceConfig(
             validator=validator,
             authenticator=RequestAuthenticator.from_env(source),
-            vault_root=source.get(ENV_VAULT_ROOT) or None,
+            vault_root=resolve_vault_root(source),
             vault_key=vault_key,
             replay_cache=replay_cache,
         )

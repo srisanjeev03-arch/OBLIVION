@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
@@ -50,6 +51,15 @@ OPERATION_PERMISSION: Final[dict[PrivilegedOperation, str]] = {
     PrivilegedOperation.PREPARE_RECOVERY_OBJECT: "file.erasure.execute",
     PrivilegedOperation.RESTORE_RECOVERY_OBJECT: "recovery.execute",
 }
+
+
+#: A vault object id: what the engine mints (``<operation id>-<hash prefix>``),
+#: with no separator, drive letter or dot-segment that could leave the vault.
+_RECOVERY_OBJECT_ID: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+
+
+def is_recovery_object_id(value: str) -> bool:
+    return bool(_RECOVERY_OBJECT_ID.fullmatch(value))
 
 
 def _is_file_id(value: object) -> bool:
@@ -191,6 +201,10 @@ class PrivilegedRequestValidator:
         # a recovery operation's name.
         destination: str | None = None
         if request.operation in RESTORE_OPERATIONS:
+            if not is_recovery_object_id(request.params.get("object_id", "")):
+                # The id becomes part of a path inside the vault; anything that
+                # could name a different directory is refused, not normalised.
+                refusals.append("Recovery object id is not a well-formed vault identifier")
             destination_refusals, destination = self._check_destination(request)
             refusals.extend(destination_refusals)
 

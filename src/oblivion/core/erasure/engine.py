@@ -289,7 +289,24 @@ class ErasureEngine:
                 f.write(payload)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(temp_dest, destination_path)
+            if allow_overwrite:
+                os.replace(temp_dest, destination_path)
+            else:
+                # The existence check above is advisory; something can appear at
+                # the destination before this point. A hard link is created only
+                # if nothing is there, so a non-overwriting restore stays one.
+                os.link(temp_dest, destination_path)
+                os.unlink(temp_dest)
+        except FileExistsError:
+            if os.path.exists(temp_dest):
+                try:
+                    os.unlink(temp_dest)
+                except Exception:
+                    pass
+            return {
+                "status": "BLOCKED",
+                "error": "Destination appeared before the restore completed; not overwritten",
+            }
         except Exception as e:
             if os.path.exists(temp_dest):
                 try:

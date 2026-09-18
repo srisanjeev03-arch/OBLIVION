@@ -1,19 +1,19 @@
 """Operation endpoints with Authentication, Approval Gating & Separation of Duties."""
 import datetime
+import json
 import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from oblivion.api.dependencies import (
     DatabaseEventEmitter,
     get_db,
+    get_privileged_client,
     resolve_audit_actor,
-    get_recovery_vault,
     get_safe_validator,
-    get_vault_key,
     require_permission,
 )
 from oblivion.api.schemas.error import ErrorResponse
@@ -34,13 +34,15 @@ from oblivion.core.auth.sod import (
     SoDViolationError,
     validate_approval,
 )
-from oblivion.core.erasure.engine import ErasureEngine, ErasureMode
-from oblivion.core.erasure.vault import RecoveryVault
 from oblivion.core.pipeline.journal import (
     DispatchConflictError,
     DispatchFacts,
     DispatchJournal,
     DispatchJournalError,
+)
+from oblivion.core.pipeline.orchestrator import (
+    MODE_OPERATION,
+    DispatchOutcomeUnestablished,
 )
 from oblivion.core.policy import PolicyEngine, PolicyError
 from oblivion.core.state.machine import State
@@ -50,6 +52,13 @@ from oblivion.persistence.database import get_session_factory
 from oblivion.persistence.models.operation import OperationEventModel
 from oblivion.persistence.models.user import UserModel
 from oblivion.persistence.repositories.operation_repo import OperationRepository
+from oblivion.privileged.client import PrivilegedClient, PrivilegedResponseRejectedError
+from oblivion.privileged.protocol import (
+    PrivilegedOperation,
+    PrivilegedResponse,
+    ResponseStatus,
+)
+from oblivion.privileged.transport import ServiceUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -452,14 +461,13 @@ def _refuse_execution(
 )
 async def execute_operation_endpoint(
     operation_id: str,
+    request: Request,
     current_user: UserModel = Depends(require_permission("operation.execute")),
     validator: SafePathValidator = Depends(get_safe_validator),
-    vault: RecoveryVault = Depends(get_recovery_vault),
-    vault_key: bytes = Depends(get_vault_key),
     db: Session = Depends(get_db),
 ) -> OperationOut:
     """
-    Executes an approved operation.
+    Executes an approved operation through the privileged service.
     Requires OPERATOR role / operation.execute permission.
     Enforces that operation was approved prior to execution.
     """
@@ -561,23 +569,31 @@ async def execute_operation_endpoint(
             safe_metadata={"target_identity_verified": False},
         )
 
-    mode_map = {
-        "COMPLETE_ERASURE": ErasureMode.COMPLETE_ERASURE,
-        "SELECTIVE_PERMANENT": ErasureMode.SELECTIVE_PERMANENT,
-        "CONTROLLED_RECOVERABLE": ErasureMode.CONTROLLED_RECOVERABLE,
-    }
-    erasure_mode = mode_map[op.mode]
+    privileged_operation = MODE_OPERATION.get(op.mode)
+    if privileged_operation is None:
+        raise _refuse_execution(
+            reason_code="MODE_NOT_EXECUTABLE",
+            message=f"Mode {op.mode!r} has no privileged operation.",
+            actor=actor,
+            operation_id=operation_id,
+            status_code=status.HTTP_409_CONFLICT,
+            target_identity=target.canonical_path,
+        )
 
-    # 3. Journal the dispatch in its own transaction before anything destructive
-    # runs. The engine's events and this route's result are written in the
-    # request transaction; if that is lost, the operation stays in ERASING (or
-    # is moved to RECONCILIATION_REQUIRED below) instead of silently READY.
+    # 3. The destructive step is performed by the privileged service, never by
+    # this process. Resolved only now, so every refusal above is recorded even
+    # where IPC is not configured.
+    privileged = get_privileged_client(request, validator)
+
+    # 4. Journal the dispatch in its own transaction before anything is sent. If
+    # the result is then lost, the operation stays ERASING (or is moved to
+    # RECONCILIATION_REQUIRED below) instead of silently READY.
     journal = DispatchJournal(get_session_factory(), actor)
     try:
         journal.record_dispatch(
             DispatchFacts(
                 operation_id=operation_id,
-                privileged_operation=f"in_process:{erasure_mode.name}",
+                privileged_operation=privileged_operation.value,
                 mode=op.mode,
                 policy_id=op.policy_id or "",
                 target_identity=target.canonical_path,
@@ -603,9 +619,36 @@ async def execute_operation_endpoint(
 
     try:
         return _execute_dispatched(
-            db, op, target.canonical_path, erasure_mode, expected_serial,
-            expected_file_id, validator, vault, vault_key, current_user,
+            db,
+            op,
+            target,
+            privileged_operation,
+            expected_serial,
+            expected_file_id,
+            privileged,
+            journal,
+            current_user,
+            actor,
         )
+    except DispatchOutcomeUnestablished as exc:
+        # Already durable: RECONCILIATION_REQUIRED, with the reason recorded.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "error_code": "OPERATION_OUTCOME_UNESTABLISHED",
+                "message": (
+                    "The destructive step was dispatched, but its outcome could not be "
+                    "established. The operation requires reconciliation and will not "
+                    "be run again until then."
+                ),
+                "details": {
+                    "operation_id": operation_id,
+                    "state": State.RECONCILIATION_REQUIRED.name,
+                    "reason_code": exc.reason_code,
+                },
+            },
+        ) from None
     except Exception as exc:
         db.rollback()
         try:
@@ -622,63 +665,152 @@ async def execute_operation_endpoint(
         raise
 
 
+#: Engine outcomes that are operation states. Anything else is recorded as FAILED.
+_ENGINE_FINAL_STATES = frozenset({State.COMPLETED.name, State.PARTIAL.name, State.FAILED.name})
+
+
 def _execute_dispatched(
     db: Session,
     op: Any,
-    target_path: str,
-    erasure_mode: ErasureMode,
+    target: Any,
+    privileged_operation: PrivilegedOperation,
     expected_serial: str,
     expected_file_id: tuple[int, int, int],
-    validator: SafePathValidator,
-    vault: RecoveryVault,
-    vault_key: bytes,
+    privileged: PrivilegedClient,
+    journal: DispatchJournal,
     current_user: UserModel,
+    actor: AuditActor,
 ) -> OperationOut:
-    """Run the in-process engine for an already-journalled dispatch and record it."""
+    """Send the journalled dispatch to the privileged service and record its answer."""
     operation_id = op.id
-
-    emitter = DatabaseEventEmitter(session=db)
-    engine = ErasureEngine(validator=validator, event_emitter=emitter)
-    if erasure_mode == ErasureMode.CONTROLLED_RECOVERABLE:
-        engine.set_vault(vault, vault_key)
-
-    # 4. Execute operation.
-    #
-    # The engine revalidates the handle itself immediately before it acts. It is
-    # given the identity recorded at analysis - not one read from disk here - so
-    # that its check compares the object against what was approved rather than
-    # against itself.
+    target_path = target.canonical_path
     op.executed_by = current_user.id
-    op_result = engine.execute_operation(
-        mode=erasure_mode,
-        operation_id=operation_id,
-        target_path=target_path,
-        target_serial=expected_serial,
-        target_file_id=expected_file_id,
-    )
 
-    # 5. Update DB State
-    final_state = op_result.get("status", "FAILED")
+    # The service re-validates containment, policy and the approved identity for
+    # itself, and its engine checks the identity again immediately before acting.
+    response: PrivilegedResponse | None
+    try:
+        response = privileged.request(
+            privileged_operation,
+            operation_id=operation_id,
+            policy_id=op.policy_id or "",
+            mode=op.mode,
+            target_path=target_path,
+            target_type=target.target_type,
+            actor_id=current_user.id,
+            expected_volume_serial=expected_serial,
+            expected_file_id=expected_file_id,
+        )
+    except ServiceUnavailableError:
+        # The pipe could not be opened, so nothing was sent: a known non-execution.
+        response = None
+    except Exception as exc:
+        reason_code = (
+            "PRIVILEGED_RESPONSE_REJECTED"
+            if isinstance(exc, PrivilegedResponseRejectedError)
+            else "PRIVILEGED_EXCHANGE_FAILED"
+        )
+        journal.record_outcome_unestablished(
+            reason_code=reason_code, error_type=type(exc).__name__
+        )
+        raise DispatchOutcomeUnestablished(operation_id, reason_code) from exc
+
+    if (
+        response is not None
+        and response.status is ResponseStatus.FAILED
+        and response.result.get("reconciliation_required")
+    ):
+        journal.record_outcome_unestablished(
+            reason_code="PRIVILEGED_OUTCOME_UNCERTAIN", error_type="PrivilegedResponse"
+        )
+        raise DispatchOutcomeUnestablished(operation_id, "PRIVILEGED_OUTCOME_UNCERTAIN")
+
+    result: dict[str, Any] = response.result if response is not None else {}
+    warnings = [str(w) for w in result.get("warnings", [])]
+    messages: list[str]
+    event_type = AuditEventType.OPERATION_EXECUTED
+    if response is None:
+        final_state = State.FAILED.name
+        op.error_code = "PRIVILEGED_SERVICE_UNAVAILABLE"
+        messages = ["The privileged service could not be reached; nothing was sent."]
+        outcome = AuditOutcome.FAILED
+    elif response.status is ResponseStatus.REFUSED:
+        # Declined by the boundary before any destructive work (A-1 vocabulary).
+        final_state = State.FAILED.name
+        op.error_code = "PRIVILEGED_REFUSED"
+        messages = list(response.refusals) or [response.message]
+        outcome = AuditOutcome.REFUSED
+        event_type = AuditEventType.OPERATION_EXECUTION_REFUSED
+    elif response.status is ResponseStatus.FAILED:
+        final_state = State.FAILED.name
+        op.error_code = "ERASURE_ERROR"
+        messages = [response.message]
+        outcome = AuditOutcome.FAILED
+    else:
+        engine_status = str(result.get("status", ""))
+        final_state = (
+            engine_status if engine_status in _ENGINE_FINAL_STATES else State.FAILED.name
+        )
+        failed = [str(m) for m in result.get("failed", [])]
+        blocked = [str(m) for m in result.get("blocked", [])]
+        if result.get("error"):
+            blocked.append(str(result["error"]))
+        if failed:
+            op.error_code = "ERASURE_ERROR"
+        elif blocked or final_state != State.COMPLETED.name:
+            op.error_code = (
+                "VAULT_UNAVAILABLE"
+                if result.get("error") == "VAULT_UNAVAILABLE"
+                else "SAFETY_VIOLATION"
+            )
+        messages = failed or blocked
+        outcome = (
+            AuditOutcome.SUCCEEDED
+            if final_state == State.COMPLETED.name
+            else AuditOutcome.FAILED
+        )
+
     op.state = final_state
     op.completed_at = datetime.datetime.now(datetime.UTC)
-    if op_result.get("warnings"):
-        op.warnings = "; ".join(op_result.get("warnings", []))
-    if op_result.get("failed") or op_result.get("blocked"):
-        errors = op_result.get("failed", []) + op_result.get("blocked", [])
-        op.error_code = "ERASURE_ERROR" if op_result.get("failed") else "SAFETY_VIOLATION"
+    if warnings:
+        op.warnings = "; ".join(warnings)
 
-    # The engine's own verdict, recorded as given. A COMPLETED here means the
-    # erasure step reported success - it is not an assurance claim, and nothing
-    # in this record should be read as one.
+    OperationRepository(db).append_event(
+        event_id=f"evt_{uuid.uuid4().hex[:12]}",
+        operation_id=operation_id,
+        sequence=20,
+        event_type="OPERATION_EXECUTED",
+        from_state=State.ERASING.name,
+        to_state=final_state,
+        payload=json.dumps(
+            {
+                "privileged_operation": privileged_operation.value,
+                "privileged_status": response.status.value if response else "UNAVAILABLE",
+                "error_code": op.error_code,
+            },
+            separators=(",", ":"),
+        ),
+    )
+
+    # The privileged service's own verdict, recorded as given. A COMPLETED here
+    # means the erasure step reported success - it is not an assurance claim.
+    if event_type is AuditEventType.OPERATION_EXECUTION_REFUSED:
+        summary = f"Execution refused by the privileged service: {op.error_code}."
+    else:
+        summary = (
+            "Executed the approved operation; the privileged service reported "
+            f"{final_state}."
+        )
     AuditLog(db).append(
-        AuditEventType.OPERATION_EXECUTED,
-        AuditOutcome.SUCCEEDED if final_state == "COMPLETED" else AuditOutcome.FAILED,
-        resolve_audit_actor(current_user, db),
+        event_type,
+        outcome,
+        actor,
         operation_id=operation_id,
         target_identity=target_path,
-        summary=f"Executed the approved operation; engine reported {final_state}.",
+        summary=summary,
         safe_metadata={
             "final_state": final_state,
+            "privileged_operation": privileged_operation.value,
             "requested_by": op.requested_by,
             "approved_by": op.approved_by,
             "executed_by": current_user.id,
@@ -695,9 +827,13 @@ def _execute_dispatched(
         mode=op.mode,
         state=op.state,
         policy_id=op.policy_id,
-        progress_percent=100.0 if final_state == "COMPLETED" else 0.0,
-        warnings=op_result.get("warnings", []),
-        error={"code": op.error_code, "message": "; ".join(op_result.get("failed", []) or op_result.get("blocked", []))} if op.error_code else None,
+        progress_percent=100.0 if final_state == State.COMPLETED.name else 0.0,
+        warnings=warnings,
+        error=(
+            {"code": op.error_code, "message": "; ".join(messages)}
+            if op.error_code
+            else None
+        ),
         actor_id=op.actor_id,
         created_at=op.created_at,
         started_at=op.started_at,

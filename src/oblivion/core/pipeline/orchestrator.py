@@ -235,7 +235,7 @@ class PipelineResult:
 
 
 #: Which privileged operation performs each mode's destructive step.
-_MODE_OPERATION: dict[str, PrivilegedOperation] = {
+MODE_OPERATION: dict[str, PrivilegedOperation] = {
     "SELECTIVE_PERMANENT": PrivilegedOperation.DELETE_FILE,
     "COMPLETE_ERASURE": PrivilegedOperation.DELETE_TREE,
     "CONTROLLED_RECOVERABLE": PrivilegedOperation.PREPARE_RECOVERY_OBJECT,
@@ -575,7 +575,7 @@ class ClosedLoopPipeline:
         self, request: PipelineRequest, result: PipelineResult
     ) -> dict[str, Any] | None:
         """Perform the destructive step through the privileged boundary."""
-        operation = _MODE_OPERATION.get(request.mode)
+        operation = MODE_OPERATION.get(request.mode)
         if operation is None:
             result.stages.append(
                 StageOutcome(
@@ -686,6 +686,18 @@ class ClosedLoopPipeline:
                 reason_code=reason_code, error_type=type(exc).__name__
             )
             raise DispatchOutcomeUnestablished(request.operation_id, reason_code) from exc
+
+        if response.status is ResponseStatus.FAILED and response.result.get(
+            "reconciliation_required"
+        ):
+            # An authentic answer that says the work may have happened anyway (a
+            # handler fault or a blown time budget). Not a failure to record.
+            journal.record_outcome_unestablished(
+                reason_code="PRIVILEGED_OUTCOME_UNCERTAIN", error_type="PrivilegedResponse"
+            )
+            raise DispatchOutcomeUnestablished(
+                request.operation_id, "PRIVILEGED_OUTCOME_UNCERTAIN"
+            )
 
         if response.status is not ResponseStatus.COMPLETED:
             result.stages.append(

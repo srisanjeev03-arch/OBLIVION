@@ -36,6 +36,7 @@ from oblivion.privileged.service import (
     ReplayCache,
     RequestAuthenticator,
     build_service_from_env,
+    resolve_vault_root,
 )
 from oblivion.privileged.transport import (
     InProcessTransport,
@@ -245,7 +246,9 @@ def get_recovery_vault(
     key: bytes = Depends(get_vault_key),
 ) -> RecoveryVault:
     """Provides RecoveryVault instance with fail-closed key validation."""
-    vault_dir = os.environ.get("OBLIVION_VAULT_DIR")
+    # The same resolution the privileged service uses, so the objects listed
+    # here are the objects the service creates and restores.
+    vault_dir = resolve_vault_root()
     if not vault_dir:
         vault_dir = os.path.join(tempfile.gettempdir(), "oblivion_vault")
     os.makedirs(vault_dir, exist_ok=True)
